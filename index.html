@@ -233,7 +233,9 @@ button {
     <div class="info-card">
       <h3>Distance</h3>
       <div class="info-line">Valeur : <span class="value" id="distanceValue">-</span></div>
-      <div class="info-line">Centre du cercle : <span class="value" id="circleCenter">-</span></div>
+      <div class="info-line">Centre du cercle :</div>
+      <div class="info-line">Latitude : <span class="value" id="circleLat">-</span></div>
+      <div class="info-line">Longitude : <span class="value" id="circleLng">-</span></div>
       <div class="info-line">Rayon du cercle : <span class="value" id="circleRadius">-</span></div>
     </div>
   </div>
@@ -359,7 +361,8 @@ const lng1El = document.getElementById("lng1");
 const lat2El = document.getElementById("lat2");
 const lng2El = document.getElementById("lng2");
 const distanceValueEl = document.getElementById("distanceValue");
-const circleCenterEl = document.getElementById("circleCenter");
+const circleLatEl = document.getElementById("circleLat");
+const circleLngEl = document.getElementById("circleLng");
 const circleRadiusEl = document.getElementById("circleRadius");
 
 function setStatus(message) {
@@ -451,10 +454,12 @@ function updateInfoCards() {
 
   if (circleLayer) {
     const c = circleLayer.getLatLng();
-    circleCenterEl.textContent = formatCoord(c.lat) + ", " + formatCoord(c.lng);
+    circleLatEl.textContent = formatCoord(c.lat);
+    circleLngEl.textContent = formatCoord(c.lng);
     circleRadiusEl.textContent = circleLayer.getRadius().toFixed(2) + " m";
   } else {
-    circleCenterEl.textContent = "-";
+    circleLatEl.textContent = "-";
+    circleLngEl.textContent = "-";
     circleRadiusEl.textContent = "-";
   }
 }
