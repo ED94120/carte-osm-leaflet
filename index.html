@@ -2,186 +2,556 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>Leaflet carte et mesure</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>carte-osm-leaflet - version 1</title>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<link
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+  crossorigin=""
+>
 
 <style>
 body {
+  margin: 0;
   font-family: Arial, sans-serif;
-  margin: 20px;
+  background: #f2f2f2;
+  color: #222;
 }
 
-#barre {
+.page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
   margin-bottom: 12px;
 }
 
-#adresse {
-  width: 420px;
-  padding: 8px;
+.toolbar input,
+.toolbar select,
+.toolbar button {
+  height: 40px;
   font-size: 16px;
+  box-sizing: border-box;
+}
+
+#adresse {
+  flex: 1 1 420px;
+  min-width: 280px;
+  padding: 8px 10px;
+}
+
+#rayon {
+  width: 130px;
+  padding: 8px 10px;
 }
 
 button {
-  padding: 8px 14px;
-  font-size: 16px;
+  padding: 0 14px;
   cursor: pointer;
-  margin-left: 4px;
 }
 
 #map {
   width: 100%;
-  max-width: 1100px;
-  height: 700px;
+  height: 720px;
   border: 1px solid #999;
+  background: #ddd;
+}
+
+.help {
+  margin: 12px 0;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid #cccccc;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 12px;
   margin-top: 12px;
 }
 
-#infos {
+.info-card {
+  background: #ffffff;
+  border: 1px solid #cccccc;
+  padding: 12px;
+  min-height: 170px;
+}
+
+.info-card h3 {
+  margin: 0 0 10px 0;
+  font-size: 20px;
+}
+
+.info-line {
+  margin: 6px 0;
+  word-break: break-word;
+}
+
+.info-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.small-btn {
+  height: 34px;
+  font-size: 14px;
+  padding: 0 10px;
+}
+
+.status {
   margin-top: 12px;
-  padding: 10px;
-  background: #f3f3f3;
-  border: 1px solid #ccc;
-  max-width: 1100px;
-  white-space: pre-line;
+  min-height: 24px;
+  font-size: 15px;
+}
+
+.value {
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.leaflet-control-layers {
+  font-size: 14px;
 }
 </style>
 </head>
 <body>
+<div class="page">
 
-<div id="barre">
-  <input type="text" id="adresse" placeholder="Saisir une adresse">
-  <button type="button" id="btnCarte">Carte</button>
-  <button type="button" id="btnEffacer">Effacer la mesure</button>
+  <div class="toolbar">
+    <input type="text" id="adresse" placeholder="Saisir une adresse">
+    <button id="btnCarte" type="button">Carte</button>
+
+    <select id="fondCarte" title="Fond de carte">
+      <option value="plan">Plan IGN</option>
+      <option value="ortho">Orthophoto IGN</option>
+    </select>
+
+    <input type="text" id="rayon" placeholder="Rayon en m">
+    <button id="btnCercle" type="button">Cercle</button>
+    <button id="btnEffacerCercle" type="button">Effacer cercle</button>
+    <button id="btnEffacerMesure" type="button">Effacer mesure</button>
+    <button id="btnExportPng" type="button">Export PNG</button>
+  </div>
+
+  <div class="help">
+    Cliquer sur un point pour obtenir sa latitude et sa longitude. Cliquer sur deux points pour mesurer la distance qui les sépare.
+  </div>
+
+  <div id="map"></div>
+
+  <div class="info-grid">
+    <div class="info-card">
+      <h3>Point 1</h3>
+      <div class="info-line">Latitude : <span class="value" id="lat1">-</span></div>
+      <div class="info-line">Longitude : <span class="value" id="lng1">-</span></div>
+      <div class="info-actions">
+        <button class="small-btn" id="copyLat1" type="button">Copier lat 1</button>
+        <button class="small-btn" id="copyLng1" type="button">Copier long 1</button>
+      </div>
+    </div>
+
+    <div class="info-card">
+      <h3>Point 2</h3>
+      <div class="info-line">Latitude : <span class="value" id="lat2">-</span></div>
+      <div class="info-line">Longitude : <span class="value" id="lng2">-</span></div>
+      <div class="info-actions">
+        <button class="small-btn" id="copyLat2" type="button">Copier lat 2</button>
+        <button class="small-btn" id="copyLng2" type="button">Copier long 2</button>
+      </div>
+    </div>
+
+    <div class="info-card">
+      <h3>Distance</h3>
+      <div class="info-line">Valeur : <span class="value" id="distanceValue">-</span></div>
+      <div class="info-line">Centre du cercle : <span class="value" id="circleCenter">-</span></div>
+      <div class="info-line">Rayon du cercle : <span class="value" id="circleRadius">-</span></div>
+    </div>
+  </div>
+
+  <div class="status" id="status"></div>
 </div>
 
-<div id="map"></div>
-<div id="infos">Cliquez sur deux points de la carte pour mesurer la distance.</div>
+<script
+  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+  crossorigin=""
+></script>
 
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
 <script>
-let map = L.map("map").setView([48.8566, 2.3522], 12);
-
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 22,
-  attribution: "&copy; OpenStreetMap contributors"
-}).addTo(map);
-
-let markers = [];
-let line = null;
-
-function majInfos(message) {
-  document.getElementById("infos").textContent = message;
-}
-
-function effacerMesure() {
-  markers.forEach(function(marker) {
-    map.removeLayer(marker);
-  });
-  markers = [];
-
-  if (line) {
-    map.removeLayer(line);
-    line = null;
-  }
-
-  majInfos("Cliquez sur deux points de la carte pour mesurer la distance.");
-}
-
-function ajouterPoint(lat, lng) {
-  if (markers.length === 2) {
-    effacerMesure();
-  }
-
-  let marker = L.marker([lat, lng]).addTo(map);
-  markers.push(marker);
-
-  if (markers.length === 1) {
-    majInfos(
-      "Point 1 :\n" +
-      "Latitude : " + lat.toFixed(8) + "\n" +
-      "Longitude : " + lng.toFixed(8) + "\n\n" +
-      "Cliquez sur un second point."
-    );
-  }
-
-  if (markers.length === 2) {
-    let p1 = markers[0].getLatLng();
-    let p2 = markers[1].getLatLng();
-
-    line = L.polyline([p1, p2]).addTo(map);
-
-    let distance = map.distance(p1, p2);
-
-    majInfos(
-      "Point 1 :\n" +
-      "Latitude : " + p1.lat.toFixed(8) + "\n" +
-      "Longitude : " + p1.lng.toFixed(8) + "\n\n" +
-      "Point 2 :\n" +
-      "Latitude : " + p2.lat.toFixed(8) + "\n" +
-      "Longitude : " + p2.lng.toFixed(8) + "\n\n" +
-      "Distance : " + distance.toFixed(2) + " m"
-    );
-  }
-}
-
-map.on("click", function(e) {
-  ajouterPoint(e.latlng.lat, e.latlng.lng);
+const map = L.map("map", {
+  center: [46.8, 2.4],
+  zoom: 6
 });
 
-function chercherAdresse() {
-  let adresse = document.getElementById("adresse").value.trim();
+const ignPlan = L.tileLayer(
+  "https://data.geopf.fr/wmts" +
+  "?SERVICE=WMTS" +
+  "&REQUEST=GetTile" +
+  "&VERSION=1.0.0" +
+  "&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2" +
+  "&STYLE=normal" +
+  "&TILEMATRIXSET=PM" +
+  "&FORMAT=image/png" +
+  "&TILEMATRIX={z}" +
+  "&TILEROW={y}" +
+  "&TILECOL={x}",
+  {
+    attribution: "IGN",
+    minZoom: 0,
+    maxZoom: 19,
+    tileSize: 256,
+    crossOrigin: true
+  }
+);
 
-  if (adresse === "") {
-    alert("Veuillez saisir une adresse.");
+const ignOrtho = L.tileLayer(
+  "https://data.geopf.fr/wmts" +
+  "?SERVICE=WMTS" +
+  "&REQUEST=GetTile" +
+  "&VERSION=1.0.0" +
+  "&LAYER=ORTHOIMAGERY.ORTHOPHOTOS" +
+  "&STYLE=normal" +
+  "&TILEMATRIXSET=PM" +
+  "&FORMAT=image/jpeg" +
+  "&TILEMATRIX={z}" +
+  "&TILEROW={y}" +
+  "&TILECOL={x}",
+  {
+    attribution: "IGN",
+    minZoom: 0,
+    maxZoom: 19,
+    tileSize: 256,
+    crossOrigin: true
+  }
+);
+
+ignPlan.addTo(map);
+
+const baseMaps = {
+  "Plan IGN": ignPlan,
+  "Orthophoto IGN": ignOrtho
+};
+
+L.control.layers(baseMaps, {}).addTo(map);
+
+let point1 = null;
+let point2 = null;
+let marker1 = null;
+let marker2 = null;
+let measureLine = null;
+let lastClickedLatLng = null;
+let circleLayer = null;
+
+const adresseInput = document.getElementById("adresse");
+const rayonInput = document.getElementById("rayon");
+const fondCarteSelect = document.getElementById("fondCarte");
+const statusEl = document.getElementById("status");
+
+const lat1El = document.getElementById("lat1");
+const lng1El = document.getElementById("lng1");
+const lat2El = document.getElementById("lat2");
+const lng2El = document.getElementById("lng2");
+const distanceValueEl = document.getElementById("distanceValue");
+const circleCenterEl = document.getElementById("circleCenter");
+const circleRadiusEl = document.getElementById("circleRadius");
+
+function setStatus(message) {
+  statusEl.textContent = message;
+}
+
+function formatCoord(value) {
+  return Number(value).toFixed(8);
+}
+
+function formatDistance(meters) {
+  if (meters < 1000) {
+    return meters.toFixed(2) + " m";
+  }
+  return meters.toFixed(2) + " m (" + (meters / 1000).toFixed(3) + " km)";
+}
+
+function normalizeNumber(value) {
+  const text = String(value).trim().replace(",", ".");
+  if (text === "") {
+    return null;
+  }
+  const num = Number(text);
+  if (!Number.isFinite(num)) {
+    return null;
+  }
+  return num;
+}
+
+function updateInfoCards() {
+  lat1El.textContent = point1 ? formatCoord(point1.lat) : "-";
+  lng1El.textContent = point1 ? formatCoord(point1.lng) : "-";
+
+  lat2El.textContent = point2 ? formatCoord(point2.lat) : "-";
+  lng2El.textContent = point2 ? formatCoord(point2.lng) : "-";
+
+  if (point1 && point2) {
+    const distance = map.distance(point1, point2);
+    distanceValueEl.textContent = formatDistance(distance);
+  } else {
+    distanceValueEl.textContent = "-";
+  }
+
+  if (circleLayer) {
+    const c = circleLayer.getLatLng();
+    circleCenterEl.textContent = formatCoord(c.lat) + ", " + formatCoord(c.lng);
+    circleRadiusEl.textContent = circleLayer.getRadius().toFixed(2) + " m";
+  } else {
+    circleCenterEl.textContent = "-";
+    circleRadiusEl.textContent = "-";
+  }
+}
+
+function clearMeasure() {
+  point1 = null;
+  point2 = null;
+
+  if (marker1) {
+    map.removeLayer(marker1);
+    marker1 = null;
+  }
+
+  if (marker2) {
+    map.removeLayer(marker2);
+    marker2 = null;
+  }
+
+  if (measureLine) {
+    map.removeLayer(measureLine);
+    measureLine = null;
+  }
+
+  updateInfoCards();
+  setStatus("Mesure effacée.");
+}
+
+function clearCircle() {
+  if (circleLayer) {
+    map.removeLayer(circleLayer);
+    circleLayer = null;
+  }
+  updateInfoCards();
+  setStatus("Cercle effacé.");
+}
+
+function addPoint(latlng) {
+  lastClickedLatLng = latlng;
+
+  if (!point1) {
+    point1 = latlng;
+    marker1 = L.marker(latlng).addTo(map);
+    updateInfoCards();
+    setStatus("Point 1 enregistré.");
     return;
   }
 
-  let url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(adresse);
+  if (!point2) {
+    point2 = latlng;
+    marker2 = L.marker(latlng).addTo(map);
 
-  fetch(url, {
-    headers: {
-      "Accept": "application/json"
+    measureLine = L.polyline([point1, point2], {
+      color: "#1f6fff",
+      weight: 3
+    }).addTo(map);
+
+    updateInfoCards();
+    setStatus("Point 2 enregistré. Distance calculée.");
+    return;
+  }
+
+  clearMeasure();
+
+  point1 = latlng;
+  marker1 = L.marker(latlng).addTo(map);
+  updateInfoCards();
+  setStatus("Nouvelle mesure. Point 1 enregistré.");
+}
+
+map.on("click", function(e) {
+  addPoint(e.latlng);
+});
+
+async function geocodeAddress() {
+  const address = adresseInput.value.trim();
+
+  if (address === "") {
+    setStatus("Veuillez saisir une adresse.");
+    return;
+  }
+
+  setStatus("Recherche de l'adresse en cours...");
+
+  try {
+    const url =
+      "https://data.geopf.fr/geocodage/search?q=" +
+      encodeURIComponent(address) +
+      "&limit=1";
+
+    const response = await fetch(url, {
+      headers: {
+        "Accept": "application/json"
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error("Erreur HTTP");
     }
-  })
-  .then(function(response) {
-    return response.json();
-  })
-  .then(function(data) {
-    if (!data || data.length === 0) {
-      alert("Adresse non trouvée.");
+
+    const data = await response.json();
+
+    if (!data.features || data.features.length === 0) {
+      setStatus("Adresse non trouvée.");
       return;
     }
 
-    let lat = parseFloat(data[0].lat);
-    let lon = parseFloat(data[0].lon);
+    const feature = data.features[0];
+    const coords = feature.geometry.coordinates;
+    const lon = Number(coords[0]);
+    const lat = Number(coords[1]);
 
     map.setView([lat, lon], 18);
-
-    majInfos(
-      "Adresse trouvée :\n" +
-      data[0].display_name + "\n\n" +
-      "Latitude : " + lat.toFixed(8) + "\n" +
-      "Longitude : " + lon.toFixed(8) + "\n\n" +
-      "Cliquez sur deux points de la carte pour mesurer la distance."
-    );
-  })
-  .catch(function() {
-    alert("Erreur lors de la recherche de l'adresse.");
-  });
+    setStatus("Adresse trouvée : " + (feature.properties.label || address));
+  } catch (error) {
+    setStatus("Erreur lors de la recherche de l'adresse.");
+  }
 }
 
-document.getElementById("btnCarte").addEventListener("click", chercherAdresse);
-document.getElementById("btnEffacer").addEventListener("click", effacerMesure);
+function drawCircle() {
+  if (!lastClickedLatLng) {
+    setStatus("Cliquez d'abord sur un point de la carte.");
+    return;
+  }
 
-document.getElementById("adresse").addEventListener("keydown", function(event) {
-  if (event.key === "Enter") {
-    chercherAdresse();
+  let radius = normalizeNumber(rayonInput.value);
+
+  if (radius === null) {
+    radius = 100;
+  }
+
+  if (radius <= 0) {
+    setStatus("Le rayon doit être strictement positif.");
+    return;
+  }
+
+  if (circleLayer) {
+    map.removeLayer(circleLayer);
+  }
+
+  circleLayer = L.circle(lastClickedLatLng, {
+    radius: radius,
+    color: "#d40000",
+    weight: 2,
+    fillColor: "#ff6666",
+    fillOpacity: 0.15
+  }).addTo(map);
+
+  updateInfoCards();
+  setStatus("Cercle dessiné.");
+}
+
+async function copyText(value, label) {
+  if (!value || value === "-") {
+    setStatus(label + " indisponible.");
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(value);
+    setStatus(label + " copié.");
+  } catch (error) {
+    setStatus("Copie impossible dans ce navigateur.");
+  }
+}
+
+async function exportMapPng() {
+  setStatus("Export PNG en cours...");
+
+  try {
+    const canvas = await html2canvas(document.getElementById("map"), {
+      useCORS: true,
+      backgroundColor: null,
+      logging: false
+    });
+
+    const link = document.createElement("a");
+    link.download = "carte.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+
+    setStatus("Export PNG terminé.");
+  } catch (error) {
+    setStatus("Impossible de générer le PNG.");
+  }
+}
+
+fondCarteSelect.addEventListener("change", function() {
+  const value = fondCarteSelect.value;
+
+  if (value === "plan") {
+    if (map.hasLayer(ignOrtho)) {
+      map.removeLayer(ignOrtho);
+    }
+    if (!map.hasLayer(ignPlan)) {
+      ignPlan.addTo(map);
+    }
+  }
+
+  if (value === "ortho") {
+    if (map.hasLayer(ignPlan)) {
+      map.removeLayer(ignPlan);
+    }
+    if (!map.hasLayer(ignOrtho)) {
+      ignOrtho.addTo(map);
+    }
   }
 });
-</script>
 
+document.getElementById("btnCarte").addEventListener("click", geocodeAddress);
+adresseInput.addEventListener("keydown", function(event) {
+  if (event.key === "Enter") {
+    geocodeAddress();
+  }
+});
+
+document.getElementById("btnCercle").addEventListener("click", drawCircle);
+document.getElementById("btnEffacerCercle").addEventListener("click", clearCircle);
+document.getElementById("btnEffacerMesure").addEventListener("click", clearMeasure);
+document.getElementById("btnExportPng").addEventListener("click", exportMapPng);
+
+document.getElementById("copyLat1").addEventListener("click", function() {
+  copyText(lat1El.textContent, "Latitude du point 1");
+});
+
+document.getElementById("copyLng1").addEventListener("click", function() {
+  copyText(lng1El.textContent, "Longitude du point 1");
+});
+
+document.getElementById("copyLat2").addEventListener("click", function() {
+  copyText(lat2El.textContent, "Latitude du point 2");
+});
+
+document.getElementById("copyLng2").addEventListener("click", function() {
+  copyText(lng2El.textContent, "Longitude du point 2");
+});
+
+updateInfoCards();
+setStatus("Application prête.");
+</script>
 </body>
 </html>
