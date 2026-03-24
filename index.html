@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Leaflet carte et mesure</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+<style>
+body {
+  font-family: Arial, sans-serif;
+  margin: 20px;
+}
+
+#barre {
+  margin-bottom: 12px;
+}
+
+#adresse {
+  width: 420px;
+  padding: 8px;
+  font-size: 16px;
+}
+
+button {
+  padding: 8px 14px;
+  font-size: 16px;
+  cursor: pointer;
+  margin-left: 4px;
+}
+
+#map {
+  width: 100%;
+  max-width: 1100px;
+  height: 700px;
+  border: 1px solid #999;
+  margin-top: 12px;
+}
+
+#infos {
+  margin-top: 12px;
+  padding: 10px;
+  background: #f3f3f3;
+  border: 1px solid #ccc;
+  max-width: 1100px;
+  white-space: pre-line;
+}
+</style>
+</head>
+<body>
+
+<div id="barre">
+  <input type="text" id="adresse" placeholder="Saisir une adresse">
+  <button type="button" id="btnCarte">Carte</button>
+  <button type="button" id="btnEffacer">Effacer la mesure</button>
+</div>
+
+<div id="map"></div>
+<div id="infos">Cliquez sur deux points de la carte pour mesurer la distance.</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script>
+let map = L.map("map").setView([48.8566, 2.3522], 12);
+
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 22,
+  attribution: "&copy; OpenStreetMap contributors"
+}).addTo(map);
+
+let markers = [];
+let line = null;
+
+function majInfos(message) {
+  document.getElementById("infos").textContent = message;
+}
+
+function effacerMesure() {
+  markers.forEach(function(marker) {
+    map.removeLayer(marker);
+  });
+  markers = [];
+
+  if (line) {
+    map.removeLayer(line);
+    line = null;
+  }
+
+  majInfos("Cliquez sur deux points de la carte pour mesurer la distance.");
+}
+
+function ajouterPoint(lat, lng) {
+  if (markers.length === 2) {
+    effacerMesure();
+  }
+
+  let marker = L.marker([lat, lng]).addTo(map);
+  markers.push(marker);
+
+  if (markers.length === 1) {
+    majInfos(
+      "Point 1 :\n" +
+      "Latitude : " + lat.toFixed(8) + "\n" +
+      "Longitude : " + lng.toFixed(8) + "\n\n" +
+      "Cliquez sur un second point."
+    );
+  }
+
+  if (markers.length === 2) {
+    let p1 = markers[0].getLatLng();
+    let p2 = markers[1].getLatLng();
+
+    line = L.polyline([p1, p2]).addTo(map);
+
+    let distance = map.distance(p1, p2);
+
+    majInfos(
+      "Point 1 :\n" +
+      "Latitude : " + p1.lat.toFixed(8) + "\n" +
+      "Longitude : " + p1.lng.toFixed(8) + "\n\n" +
+      "Point 2 :\n" +
+      "Latitude : " + p2.lat.toFixed(8) + "\n" +
+      "Longitude : " + p2.lng.toFixed(8) + "\n\n" +
+      "Distance : " + distance.toFixed(2) + " m"
+    );
+  }
+}
+
+map.on("click", function(e) {
+  ajouterPoint(e.latlng.lat, e.latlng.lng);
+});
+
+function chercherAdresse() {
+  let adresse = document.getElementById("adresse").value.trim();
+
+  if (adresse === "") {
+    alert("Veuillez saisir une adresse.");
+    return;
+  }
+
+  let url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(adresse);
+
+  fetch(url, {
+    headers: {
+      "Accept": "application/json"
+    }
+  })
+  .then(function(response) {
+    return response.json();
+  })
+  .then(function(data) {
+    if (!data || data.length === 0) {
+      alert("Adresse non trouvée.");
+      return;
+    }
+
+    let lat = parseFloat(data[0].lat);
+    let lon = parseFloat(data[0].lon);
+
+    map.setView([lat, lon], 18);
+
+    majInfos(
+      "Adresse trouvée :\n" +
+      data[0].display_name + "\n\n" +
+      "Latitude : " + lat.toFixed(8) + "\n" +
+      "Longitude : " + lon.toFixed(8) + "\n\n" +
+      "Cliquez sur deux points de la carte pour mesurer la distance."
+    );
+  })
+  .catch(function() {
+    alert("Erreur lors de la recherche de l'adresse.");
+  });
+}
+
+document.getElementById("btnCarte").addEventListener("click", chercherAdresse);
+document.getElementById("btnEffacer").addEventListener("click", effacerMesure);
+
+document.getElementById("adresse").addEventListener("keydown", function(event) {
+  if (event.key === "Enter") {
+    chercherAdresse();
+  }
+});
+</script>
+
+</body>
+</html>
