@@ -531,37 +531,25 @@ function addPoint(latlng) {
 
 function getAmenityLabel(tags) {
   if (tags.amenity === "kindergarten") {
-    return "Crèche ou maternelle";
+    return "Crèche";
   }
   if (tags.amenity === "school") {
-    return "École";
+    return "Établissement scolaire";
   }
   if (tags.amenity === "college") {
-    return "Collège";
-  }
-  if (tags.amenity === "university") {
-    return "Université";
+    return "Établissement scolaire";
   }
   if (tags.amenity === "hospital") {
-    return "Hôpital";
+    return "Établissement de soins";
   }
   if (tags.amenity === "clinic") {
-    return "Clinique";
-  }
-  if (tags.amenity === "social_facility") {
-    return "Établissement social ou médico-social";
+    return "Établissement de soins";
   }
   if (tags.healthcare === "hospital") {
-    return "Hôpital";
+    return "Établissement de soins";
   }
   if (tags.healthcare === "clinic") {
-    return "Clinique";
-  }
-  if (tags.healthcare === "nursing_home") {
-    return "EHPAD ou maison de retraite";
-  }
-  if (tags.social_facility === "nursing_home") {
-    return "EHPAD ou maison de retraite";
+    return "Établissement de soins";
   }
   return "Établissement particulier";
 }
@@ -630,10 +618,8 @@ async function loadEtablissements() {
   nwr["amenity"="college"](${south},${west},${north},${east});
   nwr["amenity"="hospital"](${south},${west},${north},${east});
   nwr["amenity"="clinic"](${south},${west},${north},${east});
-  nwr["amenity"="social_facility"]["social_facility"="nursing_home"](${south},${west},${north},${east});
   nwr["healthcare"="hospital"](${south},${west},${north},${east});
   nwr["healthcare"="clinic"](${south},${west},${north},${east});
-  nwr["healthcare"="nursing_home"](${south},${west},${north},${east});
 );
 out center;
 `;
