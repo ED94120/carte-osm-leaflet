@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>carte-osm-leaflet - version 3</title>
+<title>Analyse cartographique antenne - point de calcul</title>
 
 <link
   rel="stylesheet"
@@ -262,7 +262,7 @@ button {
       </div>
 
       <div class="antenna-field">
-        <label for="hmaValue">Hauteur a mi-antenne HMA (m)</label>
+        <label for="hmaValue">Hauteur à mi-antenne HMA (m)</label>
         <input type="text" id="hmaValue" placeholder="Ex : 18">
       </div>
 
@@ -318,6 +318,7 @@ button {
       <div class="info-line">Azimut PT2 vers PT1 : <span class="value" id="segmentAzimuth">-</span></div>
       <div class="info-line">Hauteur relative au sol (PT2 - PT1) : <span class="value" id="segmentGroundDeltaAlt">-</span></div>
       <div class="info-line">Différence d'altitude (Antenne - Point de calcul) : <span class="value" id="segmentUsefulDeltaAlt">-</span></div>
+      <div class="info-line">Distance à vol d'oiseau : <span class="value" id="segmentDistance3D">-</span></div>
       <div class="info-line">Déport azimutal à l'axe : <span class="value" id="segmentAzimuthOffset">-</span></div>
       <div class="info-line">Déport en élévation à l'axe : <span class="value" id="segmentElevationOffset">-</span></div>
     </div>
@@ -470,6 +471,7 @@ const segmentLengthEl = document.getElementById("segmentLength");
 const segmentAzimuthEl = document.getElementById("segmentAzimuth");
 const segmentGroundDeltaAltEl = document.getElementById("segmentGroundDeltaAlt");
 const segmentUsefulDeltaAltEl = document.getElementById("segmentUsefulDeltaAlt");
+const segmentDistance3DEl = document.getElementById("segmentDistance3D");
 const segmentAzimuthOffsetEl = document.getElementById("segmentAzimuthOffset");
 const segmentElevationOffsetEl = document.getElementById("segmentElevationOffset");
 
@@ -851,6 +853,10 @@ function computeAntennaAxisCalculations() {
   const antennaAltitude = point2.altitude + inputs.hmaValue;
   const pointAltitude = point1.altitude + inputs.pt1Height;
   const usefulDeltaAltitude = antennaAltitude - pointAltitude;
+  const distance3D = Math.sqrt(
+  horizontalDistance * horizontalDistance +
+  usefulDeltaAltitude * usefulDeltaAltitude
+  );
 
   const projectedDistance = horizontalDistance * Math.cos(azimuthOffset * Math.PI / 180);
   const realVerticalAngle = Math.atan2(usefulDeltaAltitude, projectedDistance) * 180 / Math.PI;
@@ -861,6 +867,7 @@ function computeAntennaAxisCalculations() {
     segmentAzimuth: segmentAzimuth,
     groundDeltaAltitude: point2.altitude - point1.altitude,
     usefulDeltaAltitude: usefulDeltaAltitude,
+    distance3D: distance3D,
     azimuthOffset: azimuthOffset,
     elevationOffset: elevationOffset
   };
@@ -898,10 +905,12 @@ function updateInfoCards() {
 
     if (antennaCalc) {
       segmentUsefulDeltaAltEl.textContent = formatSignedDistance(antennaCalc.usefulDeltaAltitude);
+      segmentDistance3DEl.textContent = formatDistance(antennaCalc.distance3D);
       segmentAzimuthOffsetEl.textContent = formatSignedAngle(antennaCalc.azimuthOffset);
       segmentElevationOffsetEl.textContent = formatSignedAngle(antennaCalc.elevationOffset);
     } else {
       segmentUsefulDeltaAltEl.textContent = "-";
+      segmentDistance3DEl.textContent = "-";
       segmentAzimuthOffsetEl.textContent = "-";
       segmentElevationOffsetEl.textContent = "-";
     }
@@ -910,6 +919,7 @@ function updateInfoCards() {
     segmentAzimuthEl.textContent = "-";
     segmentGroundDeltaAltEl.textContent = "-";
     segmentUsefulDeltaAltEl.textContent = "-";
+    segmentDistance3DEl.textContent = "-";
     segmentAzimuthOffsetEl.textContent = "-";
     segmentElevationOffsetEl.textContent = "-";
   }
