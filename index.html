@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>carte-osm-leaflet - version 1</title>
+<title>carte-osm-leaflet - version 2</title>
 
 <link
   rel="stylesheet"
@@ -123,7 +123,7 @@ button {
 
 .info-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  grid-template-columns: repeat(2, minmax(320px, 1fr));
   gap: 12px;
   margin-top: 12px;
 }
@@ -132,7 +132,7 @@ button {
   background: #ffffff;
   border: 1px solid #cccccc;
   padding: 12px;
-  min-height: 170px;
+  min-height: 190px;
 }
 
 .info-card h3 {
@@ -171,6 +171,12 @@ button {
 .leaflet-control-layers {
   font-size: 14px;
 }
+
+@media (max-width: 900px) {
+  .info-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>
 </head>
 <body>
@@ -198,7 +204,7 @@ button {
   </div>
 
   <div class="help">
-    Cliquer sur un point pour obtenir sa latitude et sa longitude. Cliquer sur deux points pour mesurer la distance qui les sépare.
+    Cliquer sur un premier point pour définir le point de calcul (PT1). Cliquer sur un second point pour définir l'antenne (PT2). Le segment est analysé dans le sens PT2 → PT1. Le cercle est centré sur le dernier point cliqué.
   </div>
 
   <div class="note">
@@ -214,6 +220,7 @@ button {
       <h3>Point 1</h3>
       <div class="info-line">Latitude : <span class="value" id="lat1">-</span></div>
       <div class="info-line">Longitude : <span class="value" id="lng1">-</span></div>
+      <div class="info-line">Altitude au sol : <span class="value" id="alt1">-</span></div>
       <div class="info-actions">
         <button class="small-btn" id="copyLat1" type="button">Copier lat 1</button>
         <button class="small-btn" id="copyLng1" type="button">Copier long 1</button>
@@ -224,6 +231,7 @@ button {
       <h3>Point 2</h3>
       <div class="info-line">Latitude : <span class="value" id="lat2">-</span></div>
       <div class="info-line">Longitude : <span class="value" id="lng2">-</span></div>
+      <div class="info-line">Altitude au sol : <span class="value" id="alt2">-</span></div>
       <div class="info-actions">
         <button class="small-btn" id="copyLat2" type="button">Copier lat 2</button>
         <button class="small-btn" id="copyLng2" type="button">Copier long 2</button>
@@ -231,11 +239,17 @@ button {
     </div>
 
     <div class="info-card">
-      <h3>Distance</h3>
-      <div class="info-line">Valeur : <span class="value" id="distanceValue">-</span></div>
-      <div class="info-line">Centre du cercle :</div>
-      <div class="info-line">Latitude : <span class="value" id="circleLat">-</span></div>
-      <div class="info-line">Longitude : <span class="value" id="circleLng">-</span></div>
+      <h3>Segment PT2 → PT1</h3>
+      <div class="info-line">Longueur horizontale : <span class="value" id="segmentLength">-</span></div>
+      <div class="info-line">Azimut PT2 → PT1 : <span class="value" id="segmentAzimuth">-</span></div>
+      <div class="info-line">Hauteur relative au sol (PT2 - PT1) : <span class="value" id="segmentDeltaAlt">-</span></div>
+    </div>
+
+    <div class="info-card">
+      <h3>Cercle</h3>
+      <div class="info-line">Latitude du centre : <span class="value" id="circleLat">-</span></div>
+      <div class="info-line">Longitude du centre : <span class="value" id="circleLng">-</span></div>
+      <div class="info-line">Altitude au sol du centre : <span class="value" id="circleAlt">-</span></div>
       <div class="info-line">Rayon du cercle : <span class="value" id="circleRadius">-</span></div>
     </div>
   </div>
@@ -252,6 +266,9 @@ button {
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
 <script>
+const ALTITUDE_API_URL = "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json";
+const ALTITUDE_RESOURCE = "ign_rge_alti_wld";
+
 const map = L.map("map", {
   center: [46.8, 2.4],
   zoom: 6
@@ -315,7 +332,10 @@ let marker2 = null;
 let measureLine = null;
 let lastClickedLatLng = null;
 let circleLayer = null;
+let circleInfo = null;
 let addressMarker = null;
+let measureVersion = 0;
+let circleVersion = 0;
 
 let etablissementsLayer = L.layerGroup().addTo(map);
 let etablissementsFetchTimer = null;
@@ -358,11 +378,19 @@ const chkEtablissements = document.getElementById("chkEtablissements");
 
 const lat1El = document.getElementById("lat1");
 const lng1El = document.getElementById("lng1");
+const alt1El = document.getElementById("alt1");
+
 const lat2El = document.getElementById("lat2");
 const lng2El = document.getElementById("lng2");
-const distanceValueEl = document.getElementById("distanceValue");
+const alt2El = document.getElementById("alt2");
+
+const segmentLengthEl = document.getElementById("segmentLength");
+const segmentAzimuthEl = document.getElementById("segmentAzimuth");
+const segmentDeltaAltEl = document.getElementById("segmentDeltaAlt");
+
 const circleLatEl = document.getElementById("circleLat");
 const circleLngEl = document.getElementById("circleLng");
+const circleAltEl = document.getElementById("circleAlt");
 const circleRadiusEl = document.getElementById("circleRadius");
 
 function setStatus(message) {
@@ -415,6 +443,16 @@ function showAddressResults(features, fallbackLabel) {
   resultatsAdressesEl.style.display = "block";
 }
 
+function createGeoPoint(latlng, token) {
+  return {
+    lat: Number(latlng.lat),
+    lng: Number(latlng.lng),
+    altitude: null,
+    altitudeStatus: "pending",
+    token: token
+  };
+}
+
 function formatCoord(value) {
   return Number(value).toFixed(8);
 }
@@ -424,6 +462,39 @@ function formatDistance(meters) {
     return meters.toFixed(2) + " m";
   }
   return meters.toFixed(2) + " m (" + (meters / 1000).toFixed(3) + " km)";
+}
+
+function formatAltitude(value) {
+  return Number(value).toFixed(2) + " m";
+}
+
+function formatAzimuth(value) {
+  return Number(value).toFixed(2) + " °";
+}
+
+function formatDeltaAltitude(value) {
+  const sign = value > 0 ? "+" : "";
+  return sign + Number(value).toFixed(2) + " m";
+}
+
+function formatAltitudeByStatus(target) {
+  if (!target) {
+    return "-";
+  }
+
+  if (target.altitudeStatus === "pending") {
+    return "calcul...";
+  }
+
+  if (target.altitudeStatus === "error") {
+    return "indisponible";
+  }
+
+  if (target.altitudeStatus === "ok" && Number.isFinite(target.altitude)) {
+    return formatAltitude(target.altitude);
+  }
+
+  return "-";
 }
 
 function normalizeNumber(value) {
@@ -438,18 +509,226 @@ function normalizeNumber(value) {
   return num;
 }
 
+function toLeafletLatLng(point) {
+  return L.latLng(point.lat, point.lng);
+}
+
+function sameCoords(a, b, tolerance = 1e-10) {
+  if (!a || !b) {
+    return false;
+  }
+
+  return (
+    Math.abs(Number(a.lat) - Number(b.lat)) <= tolerance &&
+    Math.abs(Number(a.lng) - Number(b.lng)) <= tolerance
+  );
+}
+
+function calculateAzimuthDegrees(fromPoint, toPoint) {
+  const lat1 = fromPoint.lat * Math.PI / 180;
+  const lon1 = fromPoint.lng * Math.PI / 180;
+  const lat2 = toPoint.lat * Math.PI / 180;
+  const lon2 = toPoint.lng * Math.PI / 180;
+
+  const dLon = lon2 - lon1;
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+
+  let bearing = Math.atan2(y, x) * 180 / Math.PI;
+  bearing = (bearing + 360) % 360;
+
+  return bearing;
+}
+
+async function fetchGroundAltitude(lat, lng) {
+  const url =
+    ALTITUDE_API_URL +
+    "?lon=" + encodeURIComponent(String(lng)) +
+    "&lat=" + encodeURIComponent(String(lat)) +
+    "&resource=" + encodeURIComponent(ALTITUDE_RESOURCE) +
+    "&delimiter=%7C" +
+    "&indent=false" +
+    "&measures=false" +
+    "&zonly=false";
+
+  const response = await fetch(url, {
+    headers: {
+      "Accept": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error("Erreur altimétrie");
+  }
+
+  const data = await response.json();
+
+  if (!data || !Array.isArray(data.elevations) || data.elevations.length === 0) {
+    throw new Error("Réponse altimétrique vide");
+  }
+
+  const z = Number(data.elevations[0].z);
+
+  if (!Number.isFinite(z) || z <= -99999) {
+    throw new Error("Altitude indisponible");
+  }
+
+  return z;
+}
+
+function enrichPointAltitude(pointName) {
+  const point = pointName === "point1" ? point1 : point2;
+
+  if (!point) {
+    return;
+  }
+
+  const expectedToken = point.token;
+  const lat = point.lat;
+  const lng = point.lng;
+
+  fetchGroundAltitude(lat, lng)
+    .then(function(altitude) {
+      const currentPoint = pointName === "point1" ? point1 : point2;
+
+      if (!currentPoint) {
+        return;
+      }
+
+      if (currentPoint.token !== expectedToken) {
+        return;
+      }
+
+      currentPoint.altitude = altitude;
+      currentPoint.altitudeStatus = "ok";
+
+      updateInfoCards();
+    })
+    .catch(function() {
+      const currentPoint = pointName === "point1" ? point1 : point2;
+
+      if (!currentPoint) {
+        return;
+      }
+
+      if (currentPoint.token !== expectedToken) {
+        return;
+      }
+
+      currentPoint.altitude = null;
+      currentPoint.altitudeStatus = "error";
+
+      updateInfoCards();
+    });
+}
+
+function fetchCircleAltitudeIfNeeded() {
+  if (!circleLayer || !circleInfo) {
+    return;
+  }
+
+  if (point2 && sameCoords(circleInfo, point2)) {
+    circleInfo.source = "point2";
+    updateInfoCards();
+    return;
+  }
+
+  if (point1 && sameCoords(circleInfo, point1)) {
+    circleInfo.source = "point1";
+    updateInfoCards();
+    return;
+  }
+
+  circleInfo.source = "self";
+  circleInfo.altitude = null;
+  circleInfo.altitudeStatus = "pending";
+  circleInfo.token = ++circleVersion;
+  updateInfoCards();
+
+  const expectedToken = circleInfo.token;
+  const lat = circleInfo.lat;
+  const lng = circleInfo.lng;
+
+  fetchGroundAltitude(lat, lng)
+    .then(function(altitude) {
+      if (!circleInfo) {
+        return;
+      }
+
+      if (circleInfo.token !== expectedToken) {
+        return;
+      }
+
+      circleInfo.altitude = altitude;
+      circleInfo.altitudeStatus = "ok";
+      updateInfoCards();
+    })
+    .catch(function() {
+      if (!circleInfo) {
+        return;
+      }
+
+      if (circleInfo.token !== expectedToken) {
+        return;
+      }
+
+      circleInfo.altitude = null;
+      circleInfo.altitudeStatus = "error";
+      updateInfoCards();
+    });
+}
+
+function getCircleDisplaySource() {
+  if (!circleLayer) {
+    return null;
+  }
+
+  const center = circleLayer.getLatLng();
+
+  if (point2 && sameCoords(center, point2)) {
+    return point2;
+  }
+
+  if (point1 && sameCoords(center, point1)) {
+    return point1;
+  }
+
+  return circleInfo;
+}
+
 function updateInfoCards() {
   lat1El.textContent = point1 ? formatCoord(point1.lat) : "-";
   lng1El.textContent = point1 ? formatCoord(point1.lng) : "-";
+  alt1El.textContent = formatAltitudeByStatus(point1);
 
   lat2El.textContent = point2 ? formatCoord(point2.lat) : "-";
   lng2El.textContent = point2 ? formatCoord(point2.lng) : "-";
+  alt2El.textContent = formatAltitudeByStatus(point2);
 
   if (point1 && point2) {
-    const distance = map.distance(point1, point2);
-    distanceValueEl.textContent = formatDistance(distance);
+    const p1 = toLeafletLatLng(point1);
+    const p2 = toLeafletLatLng(point2);
+    const distance = map.distance(p1, p2);
+    const azimuth = calculateAzimuthDegrees(point2, point1);
+
+    segmentLengthEl.textContent = formatDistance(distance);
+    segmentAzimuthEl.textContent = formatAzimuth(azimuth);
+
+    if (point1.altitudeStatus === "pending" || point2.altitudeStatus === "pending") {
+      segmentDeltaAltEl.textContent = "calcul...";
+    } else if (point1.altitudeStatus === "error" || point2.altitudeStatus === "error") {
+      segmentDeltaAltEl.textContent = "indisponible";
+    } else if (point1.altitudeStatus === "ok" && point2.altitudeStatus === "ok") {
+      segmentDeltaAltEl.textContent = formatDeltaAltitude(point2.altitude - point1.altitude);
+    } else {
+      segmentDeltaAltEl.textContent = "-";
+    }
   } else {
-    distanceValueEl.textContent = "-";
+    segmentLengthEl.textContent = "-";
+    segmentAzimuthEl.textContent = "-";
+    segmentDeltaAltEl.textContent = "-";
   }
 
   if (circleLayer) {
@@ -457,14 +736,19 @@ function updateInfoCards() {
     circleLatEl.textContent = formatCoord(c.lat);
     circleLngEl.textContent = formatCoord(c.lng);
     circleRadiusEl.textContent = circleLayer.getRadius().toFixed(2) + " m";
+
+    const circleSource = getCircleDisplaySource();
+    circleAltEl.textContent = formatAltitudeByStatus(circleSource);
   } else {
     circleLatEl.textContent = "-";
     circleLngEl.textContent = "-";
+    circleAltEl.textContent = "-";
     circleRadiusEl.textContent = "-";
   }
 }
 
 function clearMeasure() {
+  measureVersion++;
   point1 = null;
   point2 = null;
 
@@ -488,45 +772,52 @@ function clearMeasure() {
 }
 
 function clearCircle() {
+  circleVersion++;
+
   if (circleLayer) {
     map.removeLayer(circleLayer);
     circleLayer = null;
   }
+
+  circleInfo = null;
   updateInfoCards();
   setStatus("Cercle effacé.");
 }
 
 function addPoint(latlng) {
-  lastClickedLatLng = latlng;
+  lastClickedLatLng = L.latLng(latlng.lat, latlng.lng);
 
   if (!point1) {
-    point1 = latlng;
+    point1 = createGeoPoint(latlng, measureVersion);
     marker1 = L.marker(latlng, { icon: blueIcon }).addTo(map);
     updateInfoCards();
-    setStatus("Point 1 enregistré.");
+    setStatus("Point 1 enregistré. Altitude au sol en cours...");
+    enrichPointAltitude("point1");
     return;
   }
 
   if (!point2) {
-    point2 = latlng;
+    point2 = createGeoPoint(latlng, measureVersion);
     marker2 = L.marker(latlng, { icon: blueIcon }).addTo(map);
 
-    measureLine = L.polyline([point1, point2], {
+    measureLine = L.polyline([toLeafletLatLng(point1), toLeafletLatLng(point2)], {
       color: "#1f6fff",
       weight: 3
     }).addTo(map);
 
     updateInfoCards();
-    setStatus("Point 2 enregistré. Distance calculée.");
+    setStatus("Point 2 enregistré. Calculs du segment en cours...");
+    enrichPointAltitude("point2");
     return;
   }
 
   clearMeasure();
 
-  point1 = latlng;
+  point1 = createGeoPoint(latlng, measureVersion);
   marker1 = L.marker(latlng, { icon: blueIcon }).addTo(map);
   updateInfoCards();
-  setStatus("Nouvelle mesure. Point 1 enregistré.");
+  setStatus("Nouvelle mesure. Point 1 enregistré. Altitude au sol en cours...");
+  enrichPointAltitude("point1");
 }
 
 function getAmenityLabel(tags) {
@@ -787,12 +1078,22 @@ function drawCircle() {
     fillOpacity: 0.15
   }).addTo(map);
 
+  circleInfo = {
+    lat: Number(lastClickedLatLng.lat),
+    lng: Number(lastClickedLatLng.lng),
+    altitude: null,
+    altitudeStatus: "pending",
+    token: null,
+    source: null
+  };
+
+  fetchCircleAltitudeIfNeeded();
   updateInfoCards();
   setStatus("Cercle dessiné.");
 }
 
 async function copyText(value, label) {
-  if (!value || value === "-") {
+  if (!value || value === "-" || value === "calcul..." || value === "indisponible") {
     setStatus(label + " indisponible.");
     return;
   }
