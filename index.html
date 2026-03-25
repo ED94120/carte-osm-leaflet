@@ -341,11 +341,26 @@ button {
   crossorigin=""
 ></script>
 
+<script src="https://cdn.jsdelivr.net/npm/proj4@2.9.2/dist/proj4.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
 <script>
 const ALTITUDE_API_URL = "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json";
 const ALTITUDE_RESOURCE = "ign_rge_alti_wld";
+
+proj4.defs("EPSG:32630", "+proj=utm +zone=30 +datum=WGS84 +units=m +no_defs");
+proj4.defs("EPSG:32631", "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs");
+proj4.defs("EPSG:32632", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
+
+function getGoogleEarthUtmEpsg(lng) {
+  if (lng < 0) {
+    return "EPSG:32630";
+  }
+  if (lng < 6) {
+    return "EPSG:32631";
+  }
+  return "EPSG:32632";
+}
 
 const map = L.map("map", {
   center: [46.8, 2.4],
@@ -629,6 +644,17 @@ function toLeafletLatLng(point) {
   return L.latLng(point.lat, point.lng);
 }
 
+function toUTM(point, epsgOverride) {
+  const epsg = epsgOverride || getGoogleEarthUtmEpsg(point.lng);
+  const result = proj4("EPSG:4326", epsg, [point.lng, point.lat]);
+
+  return {
+    x: result[0],
+    y: result[1],
+    epsg: epsg
+  };
+}
+
 function sameCoords(a, b, tolerance = 1e-10) {
   if (!a || !b) {
     return false;
@@ -641,21 +667,17 @@ function sameCoords(a, b, tolerance = 1e-10) {
 }
 
 function calculateAzimuthDegrees(fromPoint, toPoint) {
-  const lat1 = fromPoint.lat * Math.PI / 180;
-  const lon1 = fromPoint.lng * Math.PI / 180;
-  const lat2 = toPoint.lat * Math.PI / 180;
-  const lon2 = toPoint.lng * Math.PI / 180;
+  const epsg = getGoogleEarthUtmEpsg(fromPoint.lng);
+  const pFrom = toUTM(fromPoint, epsg);
+  const pTo = toUTM(toPoint, epsg);
 
-  const dLon = lon2 - lon1;
-  const y = Math.sin(dLon) * Math.cos(lat2);
-  const x =
-    Math.cos(lat1) * Math.sin(lat2) -
-    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  const dX = pTo.x - pFrom.x;
+  const dY = pTo.y - pFrom.y;
 
-  let bearing = Math.atan2(y, x) * 180 / Math.PI;
-  bearing = normalizeAzimuth360(bearing);
+  let azimuth = Math.atan2(dX, dY) * 180 / Math.PI;
+  azimuth = normalizeAzimuth360(azimuth);
 
-  return bearing;
+  return azimuth;
 }
 
 async function fetchGroundAltitude(lat, lng) {
@@ -841,10 +863,14 @@ function computeAntennaAxisCalculations() {
     return null;
   }
 
-  const p1 = toLeafletLatLng(point1);
-  const p2 = toLeafletLatLng(point2);
+  const epsg = getGoogleEarthUtmEpsg(point2.lng);
+  const utm1 = toUTM(point1, epsg);
+  const utm2 = toUTM(point2, epsg);
 
-  const horizontalDistance = map.distance(p1, p2);
+  const dX = utm1.x - utm2.x;
+  const dY = utm1.y - utm2.y;
+
+  const horizontalDistance = Math.sqrt(dX * dX + dY * dY);
   const segmentAzimuth = calculateAzimuthDegrees(point2, point1);
   const axisAzimuth = normalizeAzimuth360(inputs.axisAzimuth);
 
@@ -883,9 +909,12 @@ function updateInfoCards() {
   alt2El.textContent = formatAltitudeByStatus(point2);
 
   if (point1 && point2) {
-    const p1 = toLeafletLatLng(point1);
-    const p2 = toLeafletLatLng(point2);
-    const distance = map.distance(p1, p2);
+    const epsg = getGoogleEarthUtmEpsg(point2.lng);
+    const utm1 = toUTM(point1, epsg);
+    const utm2 = toUTM(point2, epsg);
+    const dX = utm1.x - utm2.x;
+    const dY = utm1.y - utm2.y;
+    const distance = Math.sqrt(dX * dX + dY * dY);
     const azimuth = calculateAzimuthDegrees(point2, point1);
 
     segmentLengthEl.textContent = formatDistance(distance);
