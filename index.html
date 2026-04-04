@@ -58,6 +58,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .checkbox-wrap {
   display: flex;
   align-items: center;
@@ -241,6 +246,8 @@ button {
     <button id="btnEffacerCercle" type="button">Effacer cercle</button>
     <button id="btnEffacerMesure" type="button">Effacer mesure</button>
     <button id="btnExportPng" type="button">Export PNG</button>
+    <button id="btnCartoradio" type="button" disabled>Cartoradio</button>
+    <button id="btnAntennes" type="button">Antennes : ON</button>
 
     <label class="checkbox-wrap">
       <input type="checkbox" id="chkEtablissements">
@@ -282,7 +289,7 @@ button {
   </div>
 
   <div class="note">
-    Sources de données utilisées : Géoplateforme IGN (altimétrie, géocodage, fonds cartographiques), Base Adresse Nationale (BAN), BD TOPO®, Parcellaire Express (PCI) et OpenStreetMap via Overpass API.
+    Sources de données utilisées : Géoplateforme IGN (altimétrie, géocodage, fonds cartographiques), Base Adresse Nationale (BAN), BD TOPO®, Parcellaire Express (PCI), OpenStreetMap via Overpass API et GeoJSON ANFR par défaut pour l'affichage des supports.
   </div>
 
   <div id="resultatsAdresses" class="results-box" style="display:none;"></div>
@@ -347,6 +354,10 @@ button {
 <script>
 const ALTITUDE_API_URL = "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json";
 const ALTITUDE_RESOURCE = "ign_rge_alti_wld";
+
+const GITHUB_DATA_API_URL = "https://api.github.com/repos/ED94120/cartes-ign-topographie/contents/data";
+const ANFR_GEOJSON_PREFIX = "GeoJSON-support_antennes_ANFR-light-";
+const ANFR_GEOJSON_SUFFIX = ".geojson";
 
 proj4.defs("EPSG:32630", "+proj=utm +zone=30 +datum=WGS84 +units=m +no_defs");
 proj4.defs("EPSG:32631", "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs");
@@ -418,6 +429,12 @@ const baseMaps = {
 
 L.control.layers(baseMaps, {}).addTo(map);
 
+map.createPane("anfrPane");
+map.getPane("anfrPane").style.zIndex = "640";
+map.getPane("anfrPane").style.pointerEvents = "none";
+
+const anfrRenderer = L.canvas({ padding: 0.5 });
+
 let point1 = null;
 let point2 = null;
 let marker1 = null;
@@ -434,6 +451,14 @@ let etablissementsLayer = L.layerGroup().addTo(map);
 let etablissementsFetchTimer = null;
 let etablissementsLoading = false;
 let etablissementsRequestId = 0;
+
+let antennasVisible = true;
+let anfrLayer = null;
+let anfrLayerLoaded = false;
+let anfrLayerLoading = false;
+let anfrLoadPromise = null;
+let latestDefaultAnfrName = "";
+let latestDefaultAnfrUrl = "";
 
 const blueIcon = new L.Icon({
   iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png",
@@ -468,6 +493,8 @@ const fondCarteSelect = document.getElementById("fondCarte");
 const statusEl = document.getElementById("status");
 const resultatsAdressesEl = document.getElementById("resultatsAdresses");
 const chkEtablissements = document.getElementById("chkEtablissements");
+const btnCartoradio = document.getElementById("btnCartoradio");
+const btnAntennes = document.getElementById("btnAntennes");
 
 const axisAzimuthInput = document.getElementById("axisAzimuth");
 const axisTiltInput = document.getElementById("axisTilt");
@@ -497,6 +524,25 @@ const circleRadiusEl = document.getElementById("circleRadius");
 
 function setStatus(message) {
   statusEl.textContent = message;
+}
+
+function updateCartoradioButtonState() {
+  btnCartoradio.disabled = !lastClickedLatLng;
+}
+
+function updateAntennesButtonLabel() {
+  btnAntennes.textContent = antennasVisible ? "Antennes : ON" : "Antennes : OFF";
+}
+
+function isFiniteLonLat(lon, lat) {
+  return (
+    Number.isFinite(lon) &&
+    Number.isFinite(lat) &&
+    lon >= -180 &&
+    lon <= 180 &&
+    lat >= -90 &&
+    lat <= 90
+  );
 }
 
 function clearAddressResults() {
@@ -880,8 +926,8 @@ function computeAntennaAxisCalculations() {
   const pointAltitude = point1.altitude + inputs.pt1Height;
   const usefulDeltaAltitude = antennaAltitude - pointAltitude;
   const distance3D = Math.sqrt(
-  horizontalDistance * horizontalDistance +
-  usefulDeltaAltitude * usefulDeltaAltitude
+    horizontalDistance * horizontalDistance +
+    usefulDeltaAltitude * usefulDeltaAltitude
   );
 
   const projectedDistance = horizontalDistance * Math.cos(azimuthOffset * Math.PI / 180);
@@ -1008,6 +1054,7 @@ function clearCircle() {
 
 function addPoint(latlng) {
   lastClickedLatLng = L.latLng(latlng.lat, latlng.lng);
+  updateCartoradioButtonState();
 
   if (!point1) {
     point1 = createGeoPoint(latlng, measureVersion);
@@ -1169,6 +1216,7 @@ out center;
     etablissementsLayer = newLayer;
     etablissementsLayer.addTo(map);
 
+    ensureAnfrLayerVisibility();
     setStatus("Repérage des établissements particuliers mis à jour.");
   } catch (error) {
     if (chkEtablissements.checked) {
@@ -1200,6 +1248,244 @@ function escapeHtml(text) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function normalizeAnfrGeoJSON(data) {
+  if (!data || data.type !== "FeatureCollection" || !Array.isArray(data.features)) {
+    throw new Error("Le GeoJSON ANFR n'est pas une FeatureCollection valide.");
+  }
+
+  const features = [];
+  let validCount = 0;
+
+  data.features.forEach(function(feature) {
+    if (!feature || feature.type !== "Feature") {
+      return;
+    }
+
+    if (!feature.geometry || feature.geometry.type !== "Point") {
+      return;
+    }
+
+    const coords = feature.geometry.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) {
+      return;
+    }
+
+    const lon = Number(coords[0]);
+    const lat = Number(coords[1]);
+
+    if (!isFiniteLonLat(lon, lat)) {
+      return;
+    }
+
+    const clonedProperties = Object.assign({}, feature.properties || {});
+
+    if (clonedProperties.SUP_ID === undefined || clonedProperties.SUP_ID === null) {
+      clonedProperties.SUP_ID = "";
+    }
+
+    features.push({
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [lon, lat]
+      },
+      properties: clonedProperties
+    });
+
+    validCount++;
+  });
+
+  if (validCount === 0) {
+    throw new Error("Aucun support ANFR valide n'a été trouvé dans le GeoJSON par défaut.");
+  }
+
+  return {
+    type: "FeatureCollection",
+    features: features
+  };
+}
+
+function buildAnfrLayerFromGeoJSON(data) {
+  return L.geoJSON(data, {
+    pane: "anfrPane",
+    pointToLayer: function(feature, latlng) {
+      return L.circleMarker(latlng, {
+        pane: "anfrPane",
+        renderer: anfrRenderer,
+        radius: 4,
+        stroke: true,
+        color: "#ffffff",
+        weight: 1.2,
+        fill: true,
+        fillColor: "#ff2b2b",
+        fillOpacity: 0.95,
+        interactive: false
+      });
+    }
+  });
+}
+
+async function getLatestDefaultAnfrMeta() {
+  if (latestDefaultAnfrName && latestDefaultAnfrUrl) {
+    return {
+      name: latestDefaultAnfrName,
+      downloadUrl: latestDefaultAnfrUrl
+    };
+  }
+
+  const response = await fetch(GITHUB_DATA_API_URL, {
+    headers: {
+      "Accept": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error("Impossible d'interroger le dossier data du dépôt GitHub.");
+  }
+
+  const files = await response.json();
+
+  const matches = files
+    .filter(function(item) {
+      return (
+        item &&
+        item.type === "file" &&
+        typeof item.name === "string" &&
+        item.name.startsWith(ANFR_GEOJSON_PREFIX) &&
+        item.name.endsWith(ANFR_GEOJSON_SUFFIX)
+      );
+    })
+    .sort(function(a, b) {
+      return b.name.localeCompare(a.name);
+    });
+
+  if (matches.length === 0) {
+    throw new Error("Aucun GeoJSON ANFR par défaut n'a été trouvé.");
+  }
+
+  if (!matches[0].download_url) {
+    throw new Error("URL de téléchargement du GeoJSON ANFR introuvable.");
+  }
+
+  latestDefaultAnfrName = matches[0].name;
+  latestDefaultAnfrUrl = matches[0].download_url;
+
+  return {
+    name: latestDefaultAnfrName,
+    downloadUrl: latestDefaultAnfrUrl
+  };
+}
+
+async function ensureAnfrLayerLoaded() {
+  if (anfrLayerLoaded && anfrLayer) {
+    return anfrLayer;
+  }
+
+  if (anfrLoadPromise) {
+    return anfrLoadPromise;
+  }
+
+  anfrLayerLoading = true;
+
+  anfrLoadPromise = (async function() {
+    const meta = await getLatestDefaultAnfrMeta();
+
+    const response = await fetch(meta.downloadUrl, {
+      headers: {
+        "Accept": "application/json"
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error("Le téléchargement du GeoJSON ANFR par défaut a échoué.");
+    }
+
+    const data = await response.json();
+    const normalizedData = normalizeAnfrGeoJSON(data);
+
+    anfrLayer = buildAnfrLayerFromGeoJSON(normalizedData);
+    anfrLayerLoaded = true;
+
+    return anfrLayer;
+  })();
+
+  try {
+    return await anfrLoadPromise;
+  } finally {
+    anfrLayerLoading = false;
+    anfrLoadPromise = null;
+  }
+}
+
+function ensureAnfrLayerVisibility() {
+  if (!anfrLayerLoaded || !anfrLayer) {
+    return;
+  }
+
+  if (antennasVisible) {
+    if (!map.hasLayer(anfrLayer)) {
+      anfrLayer.addTo(map);
+    }
+    if (typeof anfrLayer.bringToFront === "function") {
+      anfrLayer.bringToFront();
+    }
+  } else {
+    if (map.hasLayer(anfrLayer)) {
+      map.removeLayer(anfrLayer);
+    }
+  }
+}
+
+async function initializeAnfrLayer() {
+  try {
+    await ensureAnfrLayerLoaded();
+    ensureAnfrLayerVisibility();
+  } catch (error) {
+    antennasVisible = false;
+    updateAntennesButtonLabel();
+    setStatus("Impossible de charger les supports ANFR par défaut.");
+  }
+}
+
+async function toggleAntennes() {
+  antennasVisible = !antennasVisible;
+  updateAntennesButtonLabel();
+
+  if (!antennasVisible) {
+    if (anfrLayer && map.hasLayer(anfrLayer)) {
+      map.removeLayer(anfrLayer);
+    }
+    setStatus("Affichage des supports ANFR masqué.");
+    return;
+  }
+
+  try {
+    await ensureAnfrLayerLoaded();
+    ensureAnfrLayerVisibility();
+    setStatus("Affichage des supports ANFR activé.");
+  } catch (error) {
+    antennasVisible = false;
+    updateAntennesButtonLabel();
+    setStatus("Impossible d'activer l'affichage des supports ANFR.");
+  }
+}
+
+function openCartoradioAtLastPoint() {
+  if (!lastClickedLatLng) {
+    setStatus("Cliquez d'abord sur un point de la carte.");
+    return;
+  }
+
+  const url =
+    "https://www.cartoradio.fr/#/cartographie/lonlat/" +
+    encodeURIComponent(String(lastClickedLatLng.lng)) +
+    "/" +
+    encodeURIComponent(String(lastClickedLatLng.lat));
+
+  window.open(url, "_blank", "noopener");
+  setStatus("Ouverture de Cartoradio sur le dernier point cliqué.");
 }
 
 map.on("click", function(e) {
@@ -1403,6 +1689,8 @@ fondCarteSelect.addEventListener("change", function() {
       ignOrtho.addTo(map);
     }
   }
+
+  ensureAnfrLayerVisibility();
 });
 
 chkEtablissements.addEventListener("change", function() {
@@ -1414,6 +1702,7 @@ chkEtablissements.addEventListener("change", function() {
     }
     etablissementsRequestId++;
     clearEtablissements();
+    ensureAnfrLayerVisibility();
     setStatus("Repérage des établissements particuliers masqué.");
   }
 });
@@ -1430,6 +1719,8 @@ document.getElementById("btnCercle").addEventListener("click", drawCircle);
 document.getElementById("btnEffacerCercle").addEventListener("click", clearCircle);
 document.getElementById("btnEffacerMesure").addEventListener("click", clearMeasure);
 document.getElementById("btnExportPng").addEventListener("click", exportMapPng);
+btnCartoradio.addEventListener("click", openCartoradioAtLastPoint);
+btnAntennes.addEventListener("click", toggleAntennes);
 
 document.getElementById("copyLat1").addEventListener("click", function() {
   copyText(lat1El.textContent, "Latitude du point 1");
@@ -1459,7 +1750,10 @@ document.getElementById("copyLng2").addEventListener("click", function() {
 });
 
 updateInfoCards();
+updateCartoradioButtonState();
+updateAntennesButtonLabel();
 setStatus("Application prête.");
+initializeAnfrLayer();
 </script>
 </body>
 </html>
