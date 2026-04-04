@@ -114,6 +114,29 @@ button:disabled {
   box-sizing: border-box;
 }
 
+.antenna-field input:disabled {
+  background: #f3f3f3;
+  color: #444;
+}
+
+.altitude-mode-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #fafafa;
+  border: 1px solid #d8d8d8;
+}
+
+.altitude-mode-box .checkbox-wrap {
+  display: inline-flex;
+  margin-bottom: 10px;
+}
+
+.altitude-rule {
+  font-size: 14px;
+  line-height: 1.45;
+  color: #333;
+}
+
 #map {
   width: 100%;
   height: 720px;
@@ -247,7 +270,7 @@ button:disabled {
     <button id="btnEffacerMesure" type="button">Effacer mesure</button>
     <button id="btnExportPng" type="button">Export PNG</button>
     <button id="btnCartoradio" type="button" disabled>Cartoradio</button>
-    <button id="btnAntennes" type="button">Antennes : ON</button>
+    <button id="btnAntennes" type="button">Antennes : OFF</button>
 
     <label class="checkbox-wrap">
       <input type="checkbox" id="chkEtablissements">
@@ -257,6 +280,7 @@ button:disabled {
 
   <div class="antenna-box">
     <h3>Calcul des déports à l'axe de l'antenne</h3>
+
     <div class="antenna-grid">
       <div class="antenna-field">
         <label for="axisAzimuth">Azimut de l'axe (degrés)</label>
@@ -276,6 +300,30 @@ button:disabled {
       <div class="antenna-field">
         <label for="pt1Height">Hauteur du Point 1 (m)</label>
         <input type="text" id="pt1Height" placeholder="Ex : 1,5">
+      </div>
+
+      <div class="antenna-field">
+        <label for="groundAltPt1">Altitude au sol Point 1 (m)</label>
+        <input type="text" id="groundAltPt1" placeholder="Ex : 128,5">
+      </div>
+
+      <div class="antenna-field">
+        <label for="groundAltPt2">Altitude au sol Point 2 / antenne (m)</label>
+        <input type="text" id="groundAltPt2" placeholder="Ex : 131,2">
+      </div>
+    </div>
+
+    <div class="altitude-mode-box">
+      <label class="checkbox-wrap">
+        <input type="checkbox" id="chkAltitudeIgn" checked>
+        <span>Altitude IGN</span>
+      </label>
+
+      <div class="altitude-rule">
+        Si la case <strong>Altitude IGN</strong> est cochée, les champs d'altitude au sol sont remplis automatiquement au clic sur la carte :
+        le Point 1 alimente le champ <strong>Altitude au sol Point 1</strong> et le Point 2 alimente le champ
+        <strong>Altitude au sol Point 2 / antenne</strong>. Si la case est décochée, l'utilisateur doit saisir manuellement les deux altitudes.
+        Le mode choisi est verrouillé entre le Point 1 et le Point 2, puis de nouveau modifiable après <strong>Effacer mesure</strong>.
       </div>
     </div>
   </div>
@@ -301,7 +349,8 @@ button:disabled {
       <h3>Point 1</h3>
       <div class="info-line">Latitude : <span class="value" id="lat1">-</span></div>
       <div class="info-line">Longitude : <span class="value" id="lng1">-</span></div>
-      <div class="info-line">Altitude au sol : <span class="value" id="alt1">-</span></div>
+      <div class="info-line">Altitude IGN terrain : <span class="value" id="alt1">-</span></div>
+      <div class="info-line">Altitude sol utilisée : <span class="value" id="altUsed1">-</span></div>
       <div class="info-actions">
         <button class="small-btn" id="copyLat1" type="button">Copier lat 1</button>
         <button class="small-btn" id="copyLng1" type="button">Copier long 1</button>
@@ -312,7 +361,8 @@ button:disabled {
       <h3>Point 2</h3>
       <div class="info-line">Latitude : <span class="value" id="lat2">-</span></div>
       <div class="info-line">Longitude : <span class="value" id="lng2">-</span></div>
-      <div class="info-line">Altitude au sol : <span class="value" id="alt2">-</span></div>
+      <div class="info-line">Altitude IGN terrain : <span class="value" id="alt2">-</span></div>
+      <div class="info-line">Altitude sol utilisée : <span class="value" id="altUsed2">-</span></div>
       <div class="info-actions">
         <button class="small-btn" id="copyLat2" type="button">Copier lat 2</button>
         <button class="small-btn" id="copyLng2" type="button">Copier long 2</button>
@@ -452,10 +502,9 @@ let etablissementsFetchTimer = null;
 let etablissementsLoading = false;
 let etablissementsRequestId = 0;
 
-let antennasVisible = true;
+let antennasVisible = false;
 let anfrLayer = null;
 let anfrLayerLoaded = false;
-let anfrLayerLoading = false;
 let anfrLoadPromise = null;
 let latestDefaultAnfrName = "";
 let latestDefaultAnfrUrl = "";
@@ -500,14 +549,19 @@ const axisAzimuthInput = document.getElementById("axisAzimuth");
 const axisTiltInput = document.getElementById("axisTilt");
 const hmaValueInput = document.getElementById("hmaValue");
 const pt1HeightInput = document.getElementById("pt1Height");
+const groundAltPt1Input = document.getElementById("groundAltPt1");
+const groundAltPt2Input = document.getElementById("groundAltPt2");
+const chkAltitudeIgn = document.getElementById("chkAltitudeIgn");
 
 const lat1El = document.getElementById("lat1");
 const lng1El = document.getElementById("lng1");
 const alt1El = document.getElementById("alt1");
+const altUsed1El = document.getElementById("altUsed1");
 
 const lat2El = document.getElementById("lat2");
 const lng2El = document.getElementById("lng2");
 const alt2El = document.getElementById("alt2");
+const altUsed2El = document.getElementById("altUsed2");
 
 const segmentLengthEl = document.getElementById("segmentLength");
 const segmentAzimuthEl = document.getElementById("segmentAzimuth");
@@ -532,6 +586,50 @@ function updateCartoradioButtonState() {
 
 function updateAntennesButtonLabel() {
   btnAntennes.textContent = antennasVisible ? "Antennes : ON" : "Antennes : OFF";
+}
+
+function updateAltitudeInputMode() {
+  const autoMode = chkAltitudeIgn.checked;
+  groundAltPt1Input.disabled = autoMode;
+  groundAltPt2Input.disabled = autoMode;
+}
+
+function lockAltitudeMode() {
+  chkAltitudeIgn.disabled = true;
+}
+
+function unlockAltitudeMode() {
+  chkAltitudeIgn.disabled = false;
+}
+
+function clearGroundAltitudeInputs() {
+  groundAltPt1Input.value = "";
+  groundAltPt2Input.value = "";
+}
+
+function clearGroundAltitudeInputForPoint(pointName) {
+  if (pointName === "point1") {
+    groundAltPt1Input.value = "";
+  } else if (pointName === "point2") {
+    groundAltPt2Input.value = "";
+  }
+}
+
+function setGroundAltitudeInputPending(pointName) {
+  if (pointName === "point1") {
+    groundAltPt1Input.value = "calcul...";
+  } else if (pointName === "point2") {
+    groundAltPt2Input.value = "calcul...";
+  }
+}
+
+function setGroundAltitudeInputValue(pointName, altitude) {
+  const formatted = String(Number(altitude).toFixed(2));
+  if (pointName === "point1") {
+    groundAltPt1Input.value = formatted;
+  } else if (pointName === "point2") {
+    groundAltPt2Input.value = formatted;
+  }
 }
 
 function isFiniteLonLat(lon, lat) {
@@ -648,6 +746,17 @@ function formatAltitudeByStatus(target) {
   }
 
   return "-";
+}
+
+function formatGroundAltitudeInputValue(inputEl) {
+  const value = normalizeNumber(inputEl.value);
+  if (value === null) {
+    if (String(inputEl.value).trim() === "calcul...") {
+      return "calcul...";
+    }
+    return "-";
+  }
+  return formatAltitude(value);
 }
 
 function normalizeNumber(value) {
@@ -773,6 +882,11 @@ function enrichPointAltitude(pointName) {
   const lat = point.lat;
   const lng = point.lng;
 
+  if (chkAltitudeIgn.checked) {
+    setGroundAltitudeInputPending(pointName);
+    updateInfoCards();
+  }
+
   fetchGroundAltitude(lat, lng)
     .then(function(altitude) {
       const currentPoint = pointName === "point1" ? point1 : point2;
@@ -787,6 +901,11 @@ function enrichPointAltitude(pointName) {
 
       currentPoint.altitude = altitude;
       currentPoint.altitudeStatus = "ok";
+
+      if (chkAltitudeIgn.checked) {
+        setGroundAltitudeInputValue(pointName, altitude);
+      }
+
       updateInfoCards();
     })
     .catch(function() {
@@ -802,6 +921,11 @@ function enrichPointAltitude(pointName) {
 
       currentPoint.altitude = null;
       currentPoint.altitudeStatus = "error";
+
+      if (chkAltitudeIgn.checked) {
+        clearGroundAltitudeInputForPoint(pointName);
+      }
+
       updateInfoCards();
     });
 }
@@ -885,16 +1009,14 @@ function getAngularInputs() {
     axisAzimuth: normalizeNumber(axisAzimuthInput.value),
     axisTilt: normalizeNumber(axisTiltInput.value),
     hmaValue: normalizeNumber(hmaValueInput.value),
-    pt1Height: normalizeNumber(pt1HeightInput.value)
+    pt1Height: normalizeNumber(pt1HeightInput.value),
+    groundAltPt1: normalizeNumber(groundAltPt1Input.value),
+    groundAltPt2: normalizeNumber(groundAltPt2Input.value)
   };
 }
 
 function computeAntennaAxisCalculations() {
   if (!point1 || !point2) {
-    return null;
-  }
-
-  if (point1.altitudeStatus !== "ok" || point2.altitudeStatus !== "ok") {
     return null;
   }
 
@@ -904,7 +1026,9 @@ function computeAntennaAxisCalculations() {
     inputs.axisAzimuth === null ||
     inputs.axisTilt === null ||
     inputs.hmaValue === null ||
-    inputs.pt1Height === null
+    inputs.pt1Height === null ||
+    inputs.groundAltPt1 === null ||
+    inputs.groundAltPt2 === null
   ) {
     return null;
   }
@@ -922,8 +1046,8 @@ function computeAntennaAxisCalculations() {
 
   const azimuthOffset = normalizeSignedAngle180(segmentAzimuth - axisAzimuth);
 
-  const antennaAltitude = point2.altitude + inputs.hmaValue;
-  const pointAltitude = point1.altitude + inputs.pt1Height;
+  const antennaAltitude = inputs.groundAltPt2 + inputs.hmaValue;
+  const pointAltitude = inputs.groundAltPt1 + inputs.pt1Height;
   const usefulDeltaAltitude = antennaAltitude - pointAltitude;
   const distance3D = Math.sqrt(
     horizontalDistance * horizontalDistance +
@@ -937,7 +1061,7 @@ function computeAntennaAxisCalculations() {
   return {
     horizontalDistance: horizontalDistance,
     segmentAzimuth: segmentAzimuth,
-    groundDeltaAltitude: point2.altitude - point1.altitude,
+    groundDeltaAltitude: inputs.groundAltPt2 - inputs.groundAltPt1,
     usefulDeltaAltitude: usefulDeltaAltitude,
     distance3D: distance3D,
     azimuthOffset: azimuthOffset,
@@ -949,10 +1073,12 @@ function updateInfoCards() {
   lat1El.textContent = point1 ? formatCoord(point1.lat) : "-";
   lng1El.textContent = point1 ? formatCoord(point1.lng) : "-";
   alt1El.textContent = formatAltitudeByStatus(point1);
+  altUsed1El.textContent = formatGroundAltitudeInputValue(groundAltPt1Input);
 
   lat2El.textContent = point2 ? formatCoord(point2.lat) : "-";
   lng2El.textContent = point2 ? formatCoord(point2.lng) : "-";
   alt2El.textContent = formatAltitudeByStatus(point2);
+  altUsed2El.textContent = formatGroundAltitudeInputValue(groundAltPt2Input);
 
   if (point1 && point2) {
     const epsg = getGoogleEarthUtmEpsg(point2.lng);
@@ -966,24 +1092,16 @@ function updateInfoCards() {
     segmentLengthEl.textContent = formatDistance(distance);
     segmentAzimuthEl.textContent = formatAngle(azimuth);
 
-    if (point1.altitudeStatus === "pending" || point2.altitudeStatus === "pending") {
-      segmentGroundDeltaAltEl.textContent = "calcul...";
-    } else if (point1.altitudeStatus === "error" || point2.altitudeStatus === "error") {
-      segmentGroundDeltaAltEl.textContent = "indisponible";
-    } else if (point1.altitudeStatus === "ok" && point2.altitudeStatus === "ok") {
-      segmentGroundDeltaAltEl.textContent = formatSignedDistance(point2.altitude - point1.altitude);
-    } else {
-      segmentGroundDeltaAltEl.textContent = "-";
-    }
-
     const antennaCalc = computeAntennaAxisCalculations();
 
     if (antennaCalc) {
+      segmentGroundDeltaAltEl.textContent = formatSignedDistance(antennaCalc.groundDeltaAltitude);
       segmentUsefulDeltaAltEl.textContent = formatSignedDistance(antennaCalc.usefulDeltaAltitude);
       segmentDistance3DEl.textContent = formatDistance(antennaCalc.distance3D);
       segmentAzimuthOffsetEl.textContent = formatSignedAngle(antennaCalc.azimuthOffset);
       segmentElevationOffsetEl.textContent = formatSignedAngle(antennaCalc.elevationOffset);
     } else {
+      segmentGroundDeltaAltEl.textContent = "-";
       segmentUsefulDeltaAltEl.textContent = "-";
       segmentDistance3DEl.textContent = "-";
       segmentAzimuthOffsetEl.textContent = "-";
@@ -1035,6 +1153,9 @@ function clearMeasure() {
     measureLine = null;
   }
 
+  clearGroundAltitudeInputs();
+  unlockAltitudeMode();
+  updateAltitudeInputMode();
   updateInfoCards();
   setStatus("Mesure effacée.");
 }
@@ -1057,10 +1178,23 @@ function addPoint(latlng) {
   updateCartoradioButtonState();
 
   if (!point1) {
+    lockAltitudeMode();
+
+    if (!chkAltitudeIgn.checked) {
+      clearGroundAltitudeInputForPoint("point1");
+      clearGroundAltitudeInputForPoint("point2");
+    }
+
     point1 = createGeoPoint(latlng, measureVersion);
     marker1 = L.marker(latlng, { icon: blueIcon }).addTo(map);
     updateInfoCards();
-    setStatus("Point 1 enregistré. Altitude au sol en cours...");
+
+    if (chkAltitudeIgn.checked) {
+      setStatus("Point 1 enregistré. Altitude IGN du sol en cours...");
+    } else {
+      setStatus("Point 1 enregistré. Saisissez l'altitude au sol du Point 1 si nécessaire.");
+    }
+
     enrichPointAltitude("point1");
     return;
   }
@@ -1075,17 +1209,31 @@ function addPoint(latlng) {
     }).addTo(map);
 
     updateInfoCards();
-    setStatus("Point 2 enregistré. Calculs du segment en cours...");
+
+    if (chkAltitudeIgn.checked) {
+      setStatus("Point 2 enregistré. Altitude IGN du sol en cours...");
+    } else {
+      setStatus("Point 2 enregistré. Saisissez l'altitude au sol du Point 2 / antenne.");
+    }
+
     enrichPointAltitude("point2");
     return;
   }
 
   clearMeasure();
 
+  lockAltitudeMode();
+
   point1 = createGeoPoint(latlng, measureVersion);
   marker1 = L.marker(latlng, { icon: blueIcon }).addTo(map);
   updateInfoCards();
-  setStatus("Nouvelle mesure. Point 1 enregistré. Altitude au sol en cours...");
+
+  if (chkAltitudeIgn.checked) {
+    setStatus("Nouvelle mesure. Point 1 enregistré. Altitude IGN du sol en cours...");
+  } else {
+    setStatus("Nouvelle mesure. Point 1 enregistré. Saisissez l'altitude au sol du Point 1.");
+  }
+
   enrichPointAltitude("point1");
 }
 
@@ -1387,8 +1535,6 @@ async function ensureAnfrLayerLoaded() {
     return anfrLoadPromise;
   }
 
-  anfrLayerLoading = true;
-
   anfrLoadPromise = (async function() {
     const meta = await getLatestDefaultAnfrMeta();
 
@@ -1414,7 +1560,6 @@ async function ensureAnfrLayerLoaded() {
   try {
     return await anfrLoadPromise;
   } finally {
-    anfrLayerLoading = false;
     anfrLoadPromise = null;
   }
 }
@@ -1435,17 +1580,6 @@ function ensureAnfrLayerVisibility() {
     if (map.hasLayer(anfrLayer)) {
       map.removeLayer(anfrLayer);
     }
-  }
-}
-
-async function initializeAnfrLayer() {
-  try {
-    await ensureAnfrLayerLoaded();
-    ensureAnfrLayerVisibility();
-  } catch (error) {
-    antennasVisible = false;
-    updateAntennesButtonLabel();
-    setStatus("Impossible de charger les supports ANFR par défaut.");
   }
 }
 
@@ -1707,6 +1841,22 @@ chkEtablissements.addEventListener("change", function() {
   }
 });
 
+chkAltitudeIgn.addEventListener("change", function() {
+  if (chkAltitudeIgn.disabled) {
+    return;
+  }
+
+  clearGroundAltitudeInputs();
+  updateAltitudeInputMode();
+  updateInfoCards();
+
+  if (chkAltitudeIgn.checked) {
+    setStatus("Mode Altitude IGN activé. Les champs seront remplis automatiquement lors des clics.");
+  } else {
+    setStatus("Mode manuel activé. Saisissez les deux altitudes au sol.");
+  }
+});
+
 document.getElementById("btnCarte").addEventListener("click", geocodeAddress);
 
 adresseInput.addEventListener("keydown", function(event) {
@@ -1742,7 +1892,9 @@ document.getElementById("copyLng2").addEventListener("click", function() {
   axisAzimuthInput,
   axisTiltInput,
   hmaValueInput,
-  pt1HeightInput
+  pt1HeightInput,
+  groundAltPt1Input,
+  groundAltPt2Input
 ].forEach(function(input) {
   input.addEventListener("input", function() {
     updateInfoCards();
@@ -1752,8 +1904,8 @@ document.getElementById("copyLng2").addEventListener("click", function() {
 updateInfoCards();
 updateCartoradioButtonState();
 updateAntennesButtonLabel();
+updateAltitudeInputMode();
 setStatus("Application prête.");
-initializeAnfrLayer();
 </script>
 </body>
 </html>
