@@ -356,6 +356,8 @@ button:disabled {
       <div class="info-actions">
         <button class="small-btn" id="copyLat1" type="button">Copier lat 1</button>
         <button class="small-btn" id="copyLng1" type="button">Copier long 1</button>
+        <button class="small-btn" id="copyUtmX1" type="button">Copier X 1</button>
+        <button class="small-btn" id="copyUtmY1" type="button">Copier Y 1</button>
       </div>
     </div>
 
@@ -370,6 +372,8 @@ button:disabled {
       <div class="info-actions">
         <button class="small-btn" id="copyLat2" type="button">Copier lat 2</button>
         <button class="small-btn" id="copyLng2" type="button">Copier long 2</button>
+        <button class="small-btn" id="copyUtmX2" type="button">Copier X 2</button>
+        <button class="small-btn" id="copyUtmY2" type="button">Copier Y 2</button>
       </div>
     </div>
 
@@ -382,6 +386,11 @@ button:disabled {
       <div class="info-line">Distance à vol d'oiseau : <span class="value" id="segmentDistance3D">-</span></div>
       <div class="info-line">Déport azimutal à l'axe : <span class="value" id="segmentAzimuthOffset">-</span></div>
       <div class="info-line">Déport en élévation à l'axe : <span class="value" id="segmentElevationOffset">-</span></div>
+      <div class="info-actions">
+        <button class="small-btn" id="copyDistance3D" type="button">Copier D (3D)</button>
+        <button class="small-btn" id="copyAzimuthOffset" type="button">Copier Déport az</button>
+        <button class="small-btn" id="copyElevationOffset" type="button">Copier Déport élev.</button>
+      </div>
     </div>
 
     <div class="info-card">
@@ -1851,6 +1860,33 @@ async function copyText(value, label) {
   }
 }
 
+function extractNumericValue(text) {
+  const value = String(text).trim();
+
+  if (
+    value === "" ||
+    value === "-" ||
+    value === "calcul..." ||
+    value === "indisponible"
+  ) {
+    return null;
+  }
+
+  const match = value.match(/[+-]?\d+(?:\.\d+)?/);
+  return match ? match[0] : null;
+}
+
+async function copyNumericText(text, label) {
+  const numericValue = extractNumericValue(text);
+
+  if (numericValue === null) {
+    setStatus(label + " indisponible.");
+    return;
+  }
+
+  await copyText(numericValue, label);
+}
+  
 async function exportMapPng() {
   setStatus("Export PNG en cours...");
 
@@ -1956,6 +1992,35 @@ document.getElementById("copyLat2").addEventListener("click", function() {
 document.getElementById("copyLng2").addEventListener("click", function() {
   copyText(lng2El.textContent, "Longitude du point 2");
 });
+
+document.getElementById("copyUtmX1").addEventListener("click", function() {
+  copyNumericText(utmX1El.textContent, "X du point 1");
+});
+
+document.getElementById("copyUtmY1").addEventListener("click", function() {
+  copyNumericText(utmY1El.textContent, "Y du point 1");
+});
+
+document.getElementById("copyUtmX2").addEventListener("click", function() {
+  copyNumericText(utmX2El.textContent, "X du point 2");
+});
+
+document.getElementById("copyUtmY2").addEventListener("click", function() {
+  copyNumericText(utmY2El.textContent, "Y du point 2");
+});
+
+document.getElementById("copyDistance3D").addEventListener("click", function() {
+  copyNumericText(segmentDistance3DEl.textContent, "Distance 3D");
+});
+
+document.getElementById("copyAzimuthOffset").addEventListener("click", function() {
+  copyNumericText(segmentAzimuthOffsetEl.textContent, "Déport azimutal");
+});
+
+document.getElementById("copyElevationOffset").addEventListener("click", function() {
+  copyNumericText(segmentElevationOffsetEl.textContent, "Déport en élévation");
+});
+  
 
 [
   axisAzimuthInput,
