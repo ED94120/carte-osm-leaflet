@@ -1120,8 +1120,19 @@ function updateInfoCards() {
   alt1El.textContent = formatAltitudeByStatus(point1);
   altUsed1El.textContent = formatGroundAltitudeInputValue(groundAltPt1Input);
 
+  lat2El.textContent = point2 ? formatCoord(point2.lat) : "-";
+  lng2El.textContent = point2 ? formatCoord(point2.lng) : "-";
+  alt2El.textContent = formatAltitudeByStatus(point2);
+  altUsed2El.textContent = formatGroundAltitudeInputValue(groundAltPt2Input);
+
+  let displayEpsg = null;
+
+  if (point2) {
+    displayEpsg = getUtmEpsg(point2.lat, point2.lng);
+  }
+
   if (point1) {
-    const utm1 = toUTM(point1);
+    const utm1 = toUTM(point1, displayEpsg || undefined);
     utmX1El.textContent = formatUtm(utm1.x);
     utmY1El.textContent = formatUtm(utm1.y);
   } else {
@@ -1129,13 +1140,8 @@ function updateInfoCards() {
     utmY1El.textContent = "-";
   }
 
-  lat2El.textContent = point2 ? formatCoord(point2.lat) : "-";
-  lng2El.textContent = point2 ? formatCoord(point2.lng) : "-";
-  alt2El.textContent = formatAltitudeByStatus(point2);
-  altUsed2El.textContent = formatGroundAltitudeInputValue(groundAltPt2Input);
-
   if (point2) {
-    const utm2 = toUTM(point2);
+    const utm2 = toUTM(point2, displayEpsg || undefined);
     utmX2El.textContent = formatUtm(utm2.x);
     utmY2El.textContent = formatUtm(utm2.y);
   } else {
