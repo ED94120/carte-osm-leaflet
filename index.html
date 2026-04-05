@@ -349,6 +349,8 @@ button:disabled {
       <h3>Point 1</h3>
       <div class="info-line">Latitude : <span class="value" id="lat1">-</span></div>
       <div class="info-line">Longitude : <span class="value" id="lng1">-</span></div>
+      <div class="info-line">X (UTM) : <span class="value" id="utmX1">-</span></div>
+      <div class="info-line">Y (UTM) : <span class="value" id="utmY1">-</span></div>
       <div class="info-line">Altitude IGN terrain : <span class="value" id="alt1">-</span></div>
       <div class="info-line">Altitude sol utilisée : <span class="value" id="altUsed1">-</span></div>
       <div class="info-actions">
@@ -361,6 +363,8 @@ button:disabled {
       <h3>Point 2</h3>
       <div class="info-line">Latitude : <span class="value" id="lat2">-</span></div>
       <div class="info-line">Longitude : <span class="value" id="lng2">-</span></div>
+      <div class="info-line">X (UTM) : <span class="value" id="utmX2">-</span></div>
+      <div class="info-line">Y (UTM) : <span class="value" id="utmY2">-</span></div>
       <div class="info-line">Altitude IGN terrain : <span class="value" id="alt2">-</span></div>
       <div class="info-line">Altitude sol utilisée : <span class="value" id="altUsed2">-</span></div>
       <div class="info-actions">
@@ -409,18 +413,49 @@ const GITHUB_DATA_API_URL = "https://api.github.com/repos/ED94120/cartes-ign-top
 const ANFR_GEOJSON_PREFIX = "GeoJSON-support_antennes_ANFR-light-";
 const ANFR_GEOJSON_SUFFIX = ".geojson";
 
-proj4.defs("EPSG:32630", "+proj=utm +zone=30 +datum=WGS84 +units=m +no_defs");
-proj4.defs("EPSG:32631", "+proj=utm +zone=31 +datum=WGS84 +units=m +no_defs");
-proj4.defs("EPSG:32632", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
+function getUtmZoneNumber(lat, lng) {
+  let zone = Math.floor((lng + 180) / 6) + 1;
 
-function getGoogleEarthUtmEpsg(lng) {
-  if (lng < 0) {
-    return "EPSG:32630";
+  if (lat >= 56.0 && lat < 64.0 && lng >= 3.0 && lng < 12.0) {
+    zone = 32;
   }
-  if (lng < 6) {
-    return "EPSG:32631";
+
+  if (lat >= 72.0 && lat < 84.0) {
+    if (lng >= 0.0 && lng < 9.0) zone = 31;
+    else if (lng >= 9.0 && lng < 21.0) zone = 33;
+    else if (lng >= 21.0 && lng < 33.0) zone = 35;
+    else if (lng >= 33.0 && lng < 42.0) zone = 37;
   }
-  return "EPSG:32632";
+
+  return zone;
+}
+
+function getUtmEpsg(lat, lng) {
+  const zone = getUtmZoneNumber(lat, lng);
+  const epsgBase = lat >= 0 ? 32600 : 32700;
+  return "EPSG:" + String(epsgBase + zone);
+}
+
+function ensureUtmProjDefinition(epsg) {
+  if (proj4.defs(epsg)) {
+    return;
+  }
+
+  const code = Number(String(epsg).replace("EPSG:", ""));
+  const isNorth = code >= 32601 && code <= 32660;
+  const isSouth = code >= 32701 && code <= 32760;
+
+  if (!isNorth && !isSouth) {
+    throw new Error("Code EPSG UTM non pris en charge : " + epsg);
+  }
+
+  const zone = isNorth ? code - 32600 : code - 32700;
+  const southPart = isSouth ? " +south" : "";
+
+  proj4.defs(
+    epsg,
+    "+proj=utm +zone=" + zone + southPart + " +datum=WGS84 +units=m +no_defs"
+  );
 }
 
 const map = L.map("map", {
@@ -555,11 +590,15 @@ const chkAltitudeIgn = document.getElementById("chkAltitudeIgn");
 
 const lat1El = document.getElementById("lat1");
 const lng1El = document.getElementById("lng1");
+const utmX1El = document.getElementById("utmX1");
+const utmY1El = document.getElementById("utmY1");
 const alt1El = document.getElementById("alt1");
 const altUsed1El = document.getElementById("altUsed1");
 
 const lat2El = document.getElementById("lat2");
 const lng2El = document.getElementById("lng2");
+const utmX2El = document.getElementById("utmX2");
+const utmY2El = document.getElementById("utmY2");
 const alt2El = document.getElementById("alt2");
 const altUsed2El = document.getElementById("altUsed2");
 
@@ -703,6 +742,10 @@ function formatCoord(value) {
   return Number(value).toFixed(8);
 }
 
+function formatUtm(value) {
+  return Number(value).toFixed(2);
+}
+
 function formatDistance(meters) {
   if (meters < 1000) {
     return meters.toFixed(2) + " m";
@@ -800,7 +843,9 @@ function toLeafletLatLng(point) {
 }
 
 function toUTM(point, epsgOverride) {
-  const epsg = epsgOverride || getGoogleEarthUtmEpsg(point.lng);
+  const epsg = epsgOverride || getUtmEpsg(point.lat, point.lng);
+  ensureUtmProjDefinition(epsg);
+
   const result = proj4("EPSG:4326", epsg, [point.lng, point.lat]);
 
   return {
@@ -822,7 +867,7 @@ function sameCoords(a, b, tolerance = 1e-10) {
 }
 
 function calculateAzimuthDegrees(fromPoint, toPoint) {
-  const epsg = getGoogleEarthUtmEpsg(fromPoint.lng);
+  const epsg = getUtmEpsg(fromPoint.lat, fromPoint.lng);
   const pFrom = toUTM(fromPoint, epsg);
   const pTo = toUTM(toPoint, epsg);
 
@@ -1033,7 +1078,7 @@ function computeAntennaAxisCalculations() {
     return null;
   }
 
-  const epsg = getGoogleEarthUtmEpsg(point2.lng);
+  const epsg = getUtmEpsg(point2.lat, point2.lng);
   const utm1 = toUTM(point1, epsg);
   const utm2 = toUTM(point2, epsg);
 
@@ -1075,13 +1120,31 @@ function updateInfoCards() {
   alt1El.textContent = formatAltitudeByStatus(point1);
   altUsed1El.textContent = formatGroundAltitudeInputValue(groundAltPt1Input);
 
+  if (point1) {
+    const utm1 = toUTM(point1);
+    utmX1El.textContent = formatUtm(utm1.x);
+    utmY1El.textContent = formatUtm(utm1.y);
+  } else {
+    utmX1El.textContent = "-";
+    utmY1El.textContent = "-";
+  }
+
   lat2El.textContent = point2 ? formatCoord(point2.lat) : "-";
   lng2El.textContent = point2 ? formatCoord(point2.lng) : "-";
   alt2El.textContent = formatAltitudeByStatus(point2);
   altUsed2El.textContent = formatGroundAltitudeInputValue(groundAltPt2Input);
 
+  if (point2) {
+    const utm2 = toUTM(point2);
+    utmX2El.textContent = formatUtm(utm2.x);
+    utmY2El.textContent = formatUtm(utm2.y);
+  } else {
+    utmX2El.textContent = "-";
+    utmY2El.textContent = "-";
+  }
+
   if (point1 && point2) {
-    const epsg = getGoogleEarthUtmEpsg(point2.lng);
+    const epsg = getUtmEpsg(point2.lat, point2.lng);
     const utm1 = toUTM(point1, epsg);
     const utm2 = toUTM(point2, epsg);
     const dX = utm1.x - utm2.x;
