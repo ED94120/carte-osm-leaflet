@@ -719,7 +719,7 @@ function selectAddressFeature(feature, fallbackLabel) {
   }
 
   map.setView([lat, lon], 18);
-  addressMarker = L.marker([lat, lon], { icon: orangeIcon }).addTo(map);
+  addressMarker = L.marker([lat, lon], { icon: greenIcon }).addTo(map);
   addressMarker.bindPopup(label).openPopup();
 
   clearAddressResults();
@@ -1291,7 +1291,7 @@ function addPoint(latlng) {
 
   if (!point2) {
     point2 = createGeoPoint(latlng, measureVersion);
-    marker2 = L.marker(latlng, { icon: blueIcon }).addTo(map);
+    marker2 = L.marker(latlng, { icon: orangeIcon }).addTo(map);
 
     measureLine = L.polyline([toLeafletLatLng(point1), toLeafletLatLng(point2)], {
       color: "#1f6fff",
