@@ -6,11 +6,18 @@
 <title>Analyse cartographique antenne - point de calcul</title>
 
 <link
+  href="https://unpkg.com/maplibre-gl@^5.5.0/dist/maplibre-gl.css"
   rel="stylesheet"
-  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-  crossorigin=""
->
+/>
+<script src="https://unpkg.com/maplibre-gl@^5.5.0/dist/maplibre-gl.js"></script>
+
+<link
+  href="https://unpkg.com/carte-facile@^0.9.0/dist/carte-facile.css"
+  rel="stylesheet"
+/>
+<script src="https://unpkg.com/carte-facile@^0.9.0/dist/carte-facile.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/proj4@2.9.2/dist/proj4.js"></script>
 
 <style>
 body {
@@ -35,7 +42,6 @@ body {
 }
 
 .toolbar input,
-.toolbar select,
 .toolbar button {
   height: 40px;
   font-size: 16px;
@@ -222,15 +228,15 @@ button:disabled {
 }
 
 #copyDistance3D {
-  color: #8a2be2;   /* violet */
+  color: #8a2be2;
 }
 
 #copyAzimuthOffset {
-  color: #006400;   /* vert foncé */
+  color: #006400;
 }
 
 #copyElevationOffset {
-  color: #8b4513;   /* marron */
+  color: #8b4513;
 }
 
 .status {
@@ -243,8 +249,8 @@ button:disabled {
   font-family: Consolas, "Courier New", monospace;
 }
 
-.leaflet-control-layers {
-  font-size: 14px;
+.maplibregl-popup {
+  max-width: 320px;
 }
 
 @media (max-width: 1100px) {
@@ -270,11 +276,6 @@ button:disabled {
   <div class="toolbar">
     <input type="text" id="adresse" placeholder="Saisir une adresse">
     <button id="btnCarte" type="button">Carte</button>
-
-    <select id="fondCarte" title="Fond de carte">
-      <option value="plan">Plan IGN</option>
-      <option value="ortho">Orthophoto IGN</option>
-    </select>
 
     <input type="text" id="rayon" placeholder="Rayon en m">
     <button id="btnCercle" type="button">Cercle</button>
@@ -345,11 +346,15 @@ button:disabled {
   </div>
 
   <div class="note">
+    Le sélecteur flottant <strong>Cartes</strong> en haut à droite permet de choisir le fond et d'activer séparément les surcouches, notamment <strong>Cadastre</strong> et <strong>Courbes de niveau</strong>, cumulables l'une avec l'autre.
+  </div>
+
+  <div class="note">
     Le programme interroge plusieurs services de données en ligne. Un temps d'attente de quelques secondes peut être nécessaire lors du premier clic sur le Point 1 pour récupérer l'altitude au sol. Ensuite, une fois les services sollicités et les connexions établies, la récupération des informations est généralement beaucoup plus rapide.
   </div>
 
   <div class="note">
-    Sources de données utilisées : Géoplateforme IGN (altimétrie, géocodage, fonds cartographiques), Base Adresse Nationale (BAN), BD TOPO®, Parcellaire Express (PCI), OpenStreetMap via Overpass API et GeoJSON ANFR par défaut pour l'affichage des supports.
+    Sources de données utilisées : Géoplateforme IGN (altimétrie, géocodage), Carte Facile / MapLibre pour les fonds et surcouches, OpenStreetMap via Overpass API et GeoJSON ANFR par défaut pour l'affichage des supports.
   </div>
 
   <div id="resultatsAdresses" class="results-box" style="display:none;"></div>
@@ -417,15 +422,6 @@ button:disabled {
   <div class="status" id="status"></div>
 </div>
 
-<script
-  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-  crossorigin=""
-></script>
-
-<script src="https://cdn.jsdelivr.net/npm/proj4@2.9.2/dist/proj4.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-
 <script>
 const ALTITUDE_API_URL = "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json";
 const ALTITUDE_RESOURCE = "ign_rge_alti_wld";
@@ -434,167 +430,73 @@ const GITHUB_DATA_API_URL = "https://api.github.com/repos/ED94120/cartes-ign-top
 const ANFR_GEOJSON_PREFIX = "GeoJSON-support_antennes_ANFR-light-";
 const ANFR_GEOJSON_SUFFIX = ".geojson";
 
-function getUtmZoneNumber(lat, lng) {
-  let zone = Math.floor((lng + 180) / 6) + 1;
+const ETAB_SOURCE_ID = "etablissements-source";
+const ETAB_LAYER_ID = "etablissements-layer";
 
-  if (lat >= 56.0 && lat < 64.0 && lng >= 3.0 && lng < 12.0) {
-    zone = 32;
-  }
+const POINT1_SOURCE_ID = "point1-source";
+const POINT1_LAYER_ID = "point1-layer";
 
-  if (lat >= 72.0 && lat < 84.0) {
-    if (lng >= 0.0 && lng < 9.0) zone = 31;
-    else if (lng >= 9.0 && lng < 21.0) zone = 33;
-    else if (lng >= 21.0 && lng < 33.0) zone = 35;
-    else if (lng >= 33.0 && lng < 42.0) zone = 37;
-  }
+const POINT2_SOURCE_ID = "point2-source";
+const POINT2_LAYER_ID = "point2-layer";
 
-  return zone;
-}
+const ADDRESS_SOURCE_ID = "address-source";
+const ADDRESS_LAYER_ID = "address-layer";
 
-function getUtmEpsg(lat, lng) {
-  const zone = getUtmZoneNumber(lat, lng);
-  const epsgBase = lat >= 0 ? 32600 : 32700;
-  return "EPSG:" + String(epsgBase + zone);
-}
+const LINE_SOURCE_ID = "measure-line-source";
+const LINE_LAYER_ID = "measure-line-layer";
 
-function ensureUtmProjDefinition(epsg) {
-  if (proj4.defs(epsg)) {
-    return;
-  }
+const CIRCLE_SOURCE_ID = "circle-source";
+const CIRCLE_FILL_LAYER_ID = "circle-fill-layer";
+const CIRCLE_LINE_LAYER_ID = "circle-line-layer";
 
-  const code = Number(String(epsg).replace("EPSG:", ""));
-  const isNorth = code >= 32601 && code <= 32660;
-  const isSouth = code >= 32701 && code <= 32760;
+const ANFR_SOURCE_ID = "antennes-anfr";
+const ANFR_LAYER_ID = "antennes-anfr-layer";
 
-  if (!isNorth && !isSouth) {
-    throw new Error("Code EPSG UTM non pris en charge : " + epsg);
-  }
-
-  const zone = isNorth ? code - 32600 : code - 32700;
-  const southPart = isSouth ? " +south" : "";
-
-  proj4.defs(
-    epsg,
-    "+proj=utm +zone=" + zone + southPart + " +datum=WGS84 +units=m +no_defs"
-  );
-}
-
-const map = L.map("map", {
-  center: [46.8, 2.4],
-  zoom: 6
+const map = new maplibregl.Map({
+  container: "map",
+  style: CarteFacile.mapStyles.simple,
+  center: [2.4, 46.8],
+  zoom: 6,
+  maxZoom: 18.9,
+  preserveDrawingBuffer: true
 });
 
-const ignPlan = L.tileLayer(
-  "https://data.geopf.fr/wmts" +
-  "?SERVICE=WMTS" +
-  "&REQUEST=GetTile" +
-  "&VERSION=1.0.0" +
-  "&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2" +
-  "&STYLE=normal" +
-  "&TILEMATRIXSET=PM" +
-  "&FORMAT=image/png" +
-  "&TILEMATRIX={z}" +
-  "&TILEROW={y}" +
-  "&TILECOL={x}",
-  {
-    attribution: "IGN",
-    minZoom: 0,
-    maxZoom: 19,
-    tileSize: 256,
-    crossOrigin: true
-  }
+map.addControl(new maplibregl.NavigationControl());
+map.addControl(new maplibregl.GeolocateControl());
+map.addControl(
+  new maplibregl.ScaleControl({
+    maxWidth: 290,
+    unit: "metric"
+  }),
+  "top-left"
 );
-
-const ignOrtho = L.tileLayer(
-  "https://data.geopf.fr/wmts" +
-  "?SERVICE=WMTS" +
-  "&REQUEST=GetTile" +
-  "&VERSION=1.0.0" +
-  "&LAYER=ORTHOIMAGERY.ORTHOPHOTOS" +
-  "&STYLE=normal" +
-  "&TILEMATRIXSET=PM" +
-  "&FORMAT=image/jpeg" +
-  "&TILEMATRIX={z}" +
-  "&TILEROW={y}" +
-  "&TILECOL={x}",
-  {
-    attribution: "IGN",
-    minZoom: 0,
-    maxZoom: 19,
-    tileSize: 256,
-    crossOrigin: true
-  }
-);
-
-ignPlan.addTo(map);
-
-const baseMaps = {
-  "Plan IGN": ignPlan,
-  "Orthophoto IGN": ignOrtho
-};
-
-L.control.layers(baseMaps, {}).addTo(map);
-
-map.createPane("anfrPane");
-map.getPane("anfrPane").style.zIndex = "640";
-map.getPane("anfrPane").style.pointerEvents = "none";
-
-const anfrRenderer = L.canvas({ padding: 0.5 });
+map.addControl(new CarteFacile.MapSelectorControl(), "top-right");
 
 let point1 = null;
 let point2 = null;
-let marker1 = null;
-let marker2 = null;
-let measureLine = null;
+let measureLineGeoJSON = null;
 let lastClickedLatLng = null;
-let circleLayer = null;
+let circleGeoJSON = null;
 let circleInfo = null;
-let addressMarker = null;
+let addressPoint = null;
+let addressLabel = "";
 let measureVersion = 0;
 let circleVersion = 0;
 
-let etablissementsLayer = L.layerGroup().addTo(map);
+let etablissementsData = {
+  type: "FeatureCollection",
+  features: []
+};
 let etablissementsFetchTimer = null;
 let etablissementsLoading = false;
 let etablissementsRequestId = 0;
 
 let antennasVisible = false;
-let anfrLayer = null;
-let anfrLayerLoaded = false;
-let anfrLoadPromise = null;
 let latestDefaultAnfrName = "";
 let latestDefaultAnfrUrl = "";
 
-const blueIcon = new L.Icon({
-  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png",
-  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-});
-
-const orangeIcon = new L.Icon({
-  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-orange.png",
-  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-});
-
-const greenIcon = new L.Icon({
-  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png",
-  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-});
-
 const adresseInput = document.getElementById("adresse");
 const rayonInput = document.getElementById("rayon");
-const fondCarteSelect = document.getElementById("fondCarte");
 const statusEl = document.getElementById("status");
 const resultatsAdressesEl = document.getElementById("resultatsAdresses");
 const chkEtablissements = document.getElementById("chkEtablissements");
@@ -692,61 +594,18 @@ function setGroundAltitudeInputValue(pointName, altitude) {
   }
 }
 
-function isFiniteLonLat(lon, lat) {
-  return (
-    Number.isFinite(lon) &&
-    Number.isFinite(lat) &&
-    lon >= -180 &&
-    lon <= 180 &&
-    lat >= -90 &&
-    lat <= 90
-  );
-}
-
 function clearAddressResults() {
   resultatsAdressesEl.innerHTML = "";
   resultatsAdressesEl.style.display = "none";
 }
 
-function selectAddressFeature(feature, fallbackLabel) {
-  const coords = feature.geometry.coordinates;
-  const lon = Number(coords[0]);
-  const lat = Number(coords[1]);
-  const label = feature.properties.label || fallbackLabel || "Adresse trouvée";
-
-  if (addressMarker) {
-    map.removeLayer(addressMarker);
-  }
-
-  map.setView([lat, lon], 18);
-  addressMarker = L.marker([lat, lon], { icon: greenIcon }).addTo(map);
-  addressMarker.bindPopup(label).openPopup();
-
-  clearAddressResults();
-  setStatus("Adresse sélectionnée : " + label);
-}
-
-function showAddressResults(features, fallbackLabel) {
-  clearAddressResults();
-
-  const title = document.createElement("div");
-  title.className = "result-item result-title";
-  title.textContent = "Résultats possibles :";
-  resultatsAdressesEl.appendChild(title);
-
-  features.forEach(function(feature) {
-    const item = document.createElement("div");
-    item.className = "result-item";
-    item.textContent = feature.properties.label || fallbackLabel || "Adresse sans libellé";
-
-    item.addEventListener("click", function() {
-      selectAddressFeature(feature, fallbackLabel);
-    });
-
-    resultatsAdressesEl.appendChild(item);
-  });
-
-  resultatsAdressesEl.style.display = "block";
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 function createGeoPoint(latlng, token) {
@@ -796,19 +655,15 @@ function formatAltitudeByStatus(target) {
   if (!target) {
     return "-";
   }
-
   if (target.altitudeStatus === "pending") {
     return "calcul...";
   }
-
   if (target.altitudeStatus === "error") {
     return "indisponible";
   }
-
   if (target.altitudeStatus === "ok" && Number.isFinite(target.altitude)) {
     return formatAltitude(target.altitude);
   }
-
   return "-";
 }
 
@@ -847,33 +702,13 @@ function normalizeAzimuth360(value) {
 
 function normalizeSignedAngle180(value) {
   let result = Number(value) % 360;
-
   if (result > 180) {
     result -= 360;
   }
-
   if (result <= -180) {
     result += 360;
   }
-
   return result;
-}
-
-function toLeafletLatLng(point) {
-  return L.latLng(point.lat, point.lng);
-}
-
-function toUTM(point, epsgOverride) {
-  const epsg = epsgOverride || getUtmEpsg(point.lat, point.lng);
-  ensureUtmProjDefinition(epsg);
-
-  const result = proj4("EPSG:4326", epsg, [point.lng, point.lat]);
-
-  return {
-    x: result[0],
-    y: result[1],
-    epsg: epsg
-  };
 }
 
 function sameCoords(a, b, tolerance = 1e-10) {
@@ -887,6 +722,58 @@ function sameCoords(a, b, tolerance = 1e-10) {
   );
 }
 
+function getUtmZoneNumber(lat, lng) {
+  let zone = Math.floor((lng + 180) / 6) + 1;
+
+  if (lat >= 56.0 && lat < 64.0 && lng >= 3.0 && lng < 12.0) {
+    zone = 32;
+  }
+
+  if (lat >= 72.0 && lat < 84.0) {
+    if (lng >= 0.0 && lng < 9.0) zone = 31;
+    else if (lng >= 9.0 && lng < 21.0) zone = 33;
+    else if (lng >= 21.0 && lng < 33.0) zone = 35;
+    else if (lng >= 33.0 && lng < 42.0) zone = 37;
+  }
+
+  return zone;
+}
+
+function getUtmEpsg(lat, lng) {
+  const zone = getUtmZoneNumber(lat, lng);
+  const epsgBase = lat >= 0 ? 32600 : 32700;
+  return "EPSG:" + String(epsgBase + zone);
+}
+
+function ensureUtmProjDefinition(epsg) {
+  if (proj4.defs(epsg)) {
+    return;
+  }
+
+  const code = Number(String(epsg).replace("EPSG:", ""));
+  const isNorth = code >= 32601 && code <= 32660;
+  const isSouth = code >= 32701 && code <= 32760;
+
+  if (!isNorth && !isSouth) {
+    throw new Error("Code EPSG UTM non pris en charge : " + epsg);
+  }
+
+  const zone = isNorth ? code - 32600 : code - 32700;
+  const southPart = isSouth ? " +south" : "";
+
+  proj4.defs(
+    epsg,
+    "+proj=utm +zone=" + zone + southPart + " +datum=WGS84 +units=m +no_defs"
+  );
+}
+
+function toUTM(point, epsgOverride) {
+  const epsg = epsgOverride || getUtmEpsg(point.lat, point.lng);
+  ensureUtmProjDefinition(epsg);
+  const result = proj4("EPSG:4326", epsg, [point.lng, point.lat]);
+  return { x: result[0], y: result[1], epsg: epsg };
+}
+
 function calculateAzimuthDegrees(fromPoint, toPoint) {
   const epsg = getUtmEpsg(fromPoint.lat, fromPoint.lng);
   const pFrom = toUTM(fromPoint, epsg);
@@ -897,177 +784,7 @@ function calculateAzimuthDegrees(fromPoint, toPoint) {
 
   let azimuth = Math.atan2(dX, dY) * 180 / Math.PI;
   azimuth = normalizeAzimuth360(azimuth);
-
   return azimuth;
-}
-
-async function fetchGroundAltitude(lat, lng) {
-  const url =
-    ALTITUDE_API_URL +
-    "?lon=" + encodeURIComponent(String(lng)) +
-    "&lat=" + encodeURIComponent(String(lat)) +
-    "&resource=" + encodeURIComponent(ALTITUDE_RESOURCE) +
-    "&delimiter=%7C" +
-    "&indent=false" +
-    "&measures=false" +
-    "&zonly=false";
-
-  const response = await fetch(url, {
-    headers: {
-      "Accept": "application/json"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error("Erreur altimétrie");
-  }
-
-  const data = await response.json();
-
-  if (!data || !Array.isArray(data.elevations) || data.elevations.length === 0) {
-    throw new Error("Réponse altimétrique vide");
-  }
-
-  const z = Number(data.elevations[0].z);
-
-  if (!Number.isFinite(z) || z <= -99999) {
-    throw new Error("Altitude indisponible");
-  }
-
-  return z;
-}
-
-function enrichPointAltitude(pointName) {
-  const point = pointName === "point1" ? point1 : point2;
-
-  if (!point) {
-    return;
-  }
-
-  const expectedToken = point.token;
-  const lat = point.lat;
-  const lng = point.lng;
-
-  if (chkAltitudeIgn.checked) {
-    setGroundAltitudeInputPending(pointName);
-    updateInfoCards();
-  }
-
-  fetchGroundAltitude(lat, lng)
-    .then(function(altitude) {
-      const currentPoint = pointName === "point1" ? point1 : point2;
-
-      if (!currentPoint) {
-        return;
-      }
-
-      if (currentPoint.token !== expectedToken) {
-        return;
-      }
-
-      currentPoint.altitude = altitude;
-      currentPoint.altitudeStatus = "ok";
-
-      if (chkAltitudeIgn.checked) {
-        setGroundAltitudeInputValue(pointName, altitude);
-      }
-
-      updateInfoCards();
-    })
-    .catch(function() {
-      const currentPoint = pointName === "point1" ? point1 : point2;
-
-      if (!currentPoint) {
-        return;
-      }
-
-      if (currentPoint.token !== expectedToken) {
-        return;
-      }
-
-      currentPoint.altitude = null;
-      currentPoint.altitudeStatus = "error";
-
-      if (chkAltitudeIgn.checked) {
-        clearGroundAltitudeInputForPoint(pointName);
-      }
-
-      updateInfoCards();
-    });
-}
-
-function fetchCircleAltitudeIfNeeded() {
-  if (!circleLayer || !circleInfo) {
-    return;
-  }
-
-  if (point2 && sameCoords(circleInfo, point2)) {
-    circleInfo.source = "point2";
-    updateInfoCards();
-    return;
-  }
-
-  if (point1 && sameCoords(circleInfo, point1)) {
-    circleInfo.source = "point1";
-    updateInfoCards();
-    return;
-  }
-
-  circleInfo.source = "self";
-  circleInfo.altitude = null;
-  circleInfo.altitudeStatus = "pending";
-  circleInfo.token = ++circleVersion;
-  updateInfoCards();
-
-  const expectedToken = circleInfo.token;
-  const lat = circleInfo.lat;
-  const lng = circleInfo.lng;
-
-  fetchGroundAltitude(lat, lng)
-    .then(function(altitude) {
-      if (!circleInfo) {
-        return;
-      }
-
-      if (circleInfo.token !== expectedToken) {
-        return;
-      }
-
-      circleInfo.altitude = altitude;
-      circleInfo.altitudeStatus = "ok";
-      updateInfoCards();
-    })
-    .catch(function() {
-      if (!circleInfo) {
-        return;
-      }
-
-      if (circleInfo.token !== expectedToken) {
-        return;
-      }
-
-      circleInfo.altitude = null;
-      circleInfo.altitudeStatus = "error";
-      updateInfoCards();
-    });
-}
-
-function getCircleDisplaySource() {
-  if (!circleLayer) {
-    return null;
-  }
-
-  const center = circleLayer.getLatLng();
-
-  if (point2 && sameCoords(center, point2)) {
-    return point2;
-  }
-
-  if (point1 && sameCoords(center, point1)) {
-    return point1;
-  }
-
-  return circleInfo;
 }
 
 function getAngularInputs() {
@@ -1109,12 +826,12 @@ function computeAntennaAxisCalculations() {
   const horizontalDistance = Math.sqrt(dX * dX + dY * dY);
   const segmentAzimuth = calculateAzimuthDegrees(point2, point1);
   const axisAzimuth = normalizeAzimuth360(inputs.axisAzimuth);
-
   const azimuthOffset = normalizeSignedAngle180(segmentAzimuth - axisAzimuth);
 
   const antennaAltitude = inputs.groundAltPt2 + inputs.hmaValue;
   const pointAltitude = inputs.groundAltPt1 + inputs.pt1Height;
   const usefulDeltaAltitude = antennaAltitude - pointAltitude;
+
   const distance3D = Math.sqrt(
     horizontalDistance * horizontalDistance +
     usefulDeltaAltitude * usefulDeltaAltitude
@@ -1135,6 +852,126 @@ function computeAntennaAxisCalculations() {
   };
 }
 
+function createPointFeature(point) {
+  return {
+    type: "FeatureCollection",
+    features: point ? [{
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [point.lng, point.lat]
+      },
+      properties: {}
+    }] : []
+  };
+}
+
+function createAddressFeature() {
+  return {
+    type: "FeatureCollection",
+    features: addressPoint ? [{
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [addressPoint.lng, addressPoint.lat]
+      },
+      properties: {
+        label: addressLabel || "Adresse"
+      }
+    }] : []
+  };
+}
+
+function createLineFeature() {
+  return measureLineGeoJSON || {
+    type: "FeatureCollection",
+    features: []
+  };
+}
+
+function createCircleFeature() {
+  return circleGeoJSON || {
+    type: "FeatureCollection",
+    features: []
+  };
+}
+
+function createGeoJSONCircle(center, radiusMeters, steps = 96) {
+  const coords = [];
+  const lat = center.lat * Math.PI / 180;
+  const lng = center.lng * Math.PI / 180;
+  const earthRadius = 6378137;
+
+  for (let i = 0; i <= steps; i++) {
+    const bearing = (i / steps) * 2 * Math.PI;
+    const angularDistance = radiusMeters / earthRadius;
+
+    const lat2 = Math.asin(
+      Math.sin(lat) * Math.cos(angularDistance) +
+      Math.cos(lat) * Math.sin(angularDistance) * Math.cos(bearing)
+    );
+
+    const lng2 = lng + Math.atan2(
+      Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(lat),
+      Math.cos(angularDistance) - Math.sin(lat) * Math.sin(lat2)
+    );
+
+    coords.push([lng2 * 180 / Math.PI, lat2 * 180 / Math.PI]);
+  }
+
+  return {
+    type: "FeatureCollection",
+    features: [{
+      type: "Feature",
+      geometry: {
+        type: "Polygon",
+        coordinates: [coords]
+      },
+      properties: {}
+    }]
+  };
+}
+
+function updateMeasureLineGeometry() {
+  if (point1 && point2) {
+    measureLineGeoJSON = {
+      type: "FeatureCollection",
+      features: [{
+        type: "Feature",
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [point1.lng, point1.lat],
+            [point2.lng, point2.lat]
+          ]
+        },
+        properties: {}
+      }]
+    };
+  } else {
+    measureLineGeoJSON = {
+      type: "FeatureCollection",
+      features: []
+    };
+  }
+}
+
+function getCircleDisplaySource() {
+  if (!circleInfo) {
+    return null;
+  }
+
+  if (point2 && sameCoords(circleInfo, point2)) {
+    return point2;
+  }
+
+  if (point1 && sameCoords(circleInfo, point1)) {
+    return point1;
+  }
+
+  return circleInfo;
+}
+
 function updateInfoCards() {
   lat1El.textContent = point1 ? formatCoord(point1.lat) : "-";
   lng1El.textContent = point1 ? formatCoord(point1.lng) : "-";
@@ -1147,7 +984,6 @@ function updateInfoCards() {
   altUsed2El.textContent = formatGroundAltitudeInputValue(groundAltPt2Input);
 
   let displayEpsg = null;
-
   if (point2) {
     displayEpsg = getUtmEpsg(point2.lat, point2.lng);
   }
@@ -1207,11 +1043,10 @@ function updateInfoCards() {
     segmentElevationOffsetEl.textContent = "-";
   }
 
-  if (circleLayer) {
-    const c = circleLayer.getLatLng();
-    circleLatEl.textContent = formatCoord(c.lat);
-    circleLngEl.textContent = formatCoord(c.lng);
-    circleRadiusEl.textContent = circleLayer.getRadius().toFixed(2) + " m";
+  if (circleInfo && circleInfo.radius) {
+    circleLatEl.textContent = formatCoord(circleInfo.lat);
+    circleLngEl.textContent = formatCoord(circleInfo.lng);
+    circleRadiusEl.textContent = Number(circleInfo.radius).toFixed(2) + " m";
 
     const circleSource = getCircleDisplaySource();
     circleAltEl.textContent = formatAltitudeByStatus(circleSource);
@@ -1223,48 +1058,352 @@ function updateInfoCards() {
   }
 }
 
-function clearMeasure() {
+async function fetchGroundAltitude(lat, lng) {
+  const url =
+    ALTITUDE_API_URL +
+    "?lon=" + encodeURIComponent(String(lng)) +
+    "&lat=" + encodeURIComponent(String(lat)) +
+    "&resource=" + encodeURIComponent(ALTITUDE_RESOURCE) +
+    "&delimiter=%7C" +
+    "&indent=false" +
+    "&measures=false" +
+    "&zonly=false";
+
+  const response = await fetch(url, {
+    headers: {
+      "Accept": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error("Erreur altimétrie");
+  }
+
+  const data = await response.json();
+
+  if (!data || !Array.isArray(data.elevations) || data.elevations.length === 0) {
+    throw new Error("Réponse altimétrique vide");
+  }
+
+  const z = Number(data.elevations[0].z);
+
+  if (!Number.isFinite(z) || z <= -99999) {
+    throw new Error("Altitude indisponible");
+  }
+
+  return z;
+}
+
+function enrichPointAltitude(pointName) {
+  const point = pointName === "point1" ? point1 : point2;
+  if (!point) {
+    return;
+  }
+
+  const expectedToken = point.token;
+  const lat = point.lat;
+  const lng = point.lng;
+
+  if (chkAltitudeIgn.checked) {
+    setGroundAltitudeInputPending(pointName);
+    updateInfoCards();
+  }
+
+  fetchGroundAltitude(lat, lng)
+    .then(function(altitude) {
+      const currentPoint = pointName === "point1" ? point1 : point2;
+      if (!currentPoint || currentPoint.token !== expectedToken) {
+        return;
+      }
+
+      currentPoint.altitude = altitude;
+      currentPoint.altitudeStatus = "ok";
+
+      if (chkAltitudeIgn.checked) {
+        setGroundAltitudeInputValue(pointName, altitude);
+      }
+
+      updateInfoCards();
+    })
+    .catch(function() {
+      const currentPoint = pointName === "point1" ? point1 : point2;
+      if (!currentPoint || currentPoint.token !== expectedToken) {
+        return;
+      }
+
+      currentPoint.altitude = null;
+      currentPoint.altitudeStatus = "error";
+
+      if (chkAltitudeIgn.checked) {
+        clearGroundAltitudeInputForPoint(pointName);
+      }
+
+      updateInfoCards();
+    });
+}
+
+function fetchCircleAltitudeIfNeeded() {
+  if (!circleInfo) {
+    return;
+  }
+
+  if (point2 && sameCoords(circleInfo, point2)) {
+    circleInfo.source = "point2";
+    updateInfoCards();
+    return;
+  }
+
+  if (point1 && sameCoords(circleInfo, point1)) {
+    circleInfo.source = "point1";
+    updateInfoCards();
+    return;
+  }
+
+  circleInfo.source = "self";
+  circleInfo.altitude = null;
+  circleInfo.altitudeStatus = "pending";
+  circleInfo.token = ++circleVersion;
+  updateInfoCards();
+
+  const expectedToken = circleInfo.token;
+  const lat = circleInfo.lat;
+  const lng = circleInfo.lng;
+
+  fetchGroundAltitude(lat, lng)
+    .then(function(altitude) {
+      if (!circleInfo || circleInfo.token !== expectedToken) {
+        return;
+      }
+      circleInfo.altitude = altitude;
+      circleInfo.altitudeStatus = "ok";
+      updateInfoCards();
+    })
+    .catch(function() {
+      if (!circleInfo || circleInfo.token !== expectedToken) {
+        return;
+      }
+      circleInfo.altitude = null;
+      circleInfo.altitudeStatus = "error";
+      updateInfoCards();
+    });
+}
+
+function addOrUpdateSource(id, data) {
+  if (map.getSource(id)) {
+    map.getSource(id).setData(data);
+  } else {
+    map.addSource(id, {
+      type: "geojson",
+      data: data
+    });
+  }
+}
+
+function replaceLayerIfTypeDiffers(id, wantedType) {
+  const layer = map.getLayer(id);
+  if (layer && layer.type !== wantedType) {
+    map.removeLayer(id);
+  }
+}
+
+function ensureLayerCircle(id, sourceId, paint) {
+  replaceLayerIfTypeDiffers(id, "circle");
+  if (!map.getLayer(id)) {
+    map.addLayer({
+      id: id,
+      type: "circle",
+      source: sourceId,
+      paint: paint
+    });
+  }
+}
+
+function ensureLayerLine(id, sourceId, paint) {
+  replaceLayerIfTypeDiffers(id, "line");
+  if (!map.getLayer(id)) {
+    map.addLayer({
+      id: id,
+      type: "line",
+      source: sourceId,
+      paint: paint
+    });
+  }
+}
+
+function ensureLayerFill(id, sourceId, paint) {
+  replaceLayerIfTypeDiffers(id, "fill");
+  if (!map.getLayer(id)) {
+    map.addLayer({
+      id: id,
+      type: "fill",
+      source: sourceId,
+      paint: paint
+    });
+  }
+}
+
+function ensureLayerSymbol(id, sourceId, imageId, iconAnchor) {
+  replaceLayerIfTypeDiffers(id, "symbol");
+  if (!map.getLayer(id)) {
+    map.addLayer({
+      id: id,
+      type: "symbol",
+      source: sourceId,
+      layout: {
+        "icon-image": imageId,
+        "icon-size": 1,
+        "icon-anchor": iconAnchor || "bottom",
+        "icon-allow-overlap": true
+      }
+    });
+  }
+}
+
+function buildMarkerImage(fillColor) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 50;
+  canvas.height = 82;
+
+  const ctx = canvas.getContext("2d");
+
+  ctx.scale(2, 2);
+
+  ctx.beginPath();
+  ctx.moveTo(12.5, 1);
+  ctx.bezierCurveTo(6.5, 1, 1.5, 6, 1.5, 12);
+  ctx.bezierCurveTo(1.5, 20.5, 12.5, 39, 12.5, 39);
+  ctx.bezierCurveTo(12.5, 39, 23.5, 20.5, 23.5, 12);
+  ctx.bezierCurveTo(23.5, 6, 18.5, 1, 12.5, 1);
+  ctx.closePath();
+
+  ctx.fillStyle = fillColor;
+  ctx.fill();
+
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "#ffffff";
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(12.5, 12, 4.2, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  return {
+    width: canvas.width,
+    height: canvas.height,
+    data: imageData.data
+  };
+}
+
+function ensureCanvasMarkerImage(imageId, fillColor) {
+  if (map.hasImage(imageId)) {
+    return true;
+  }
+
+  try {
+    const image = buildMarkerImage(fillColor);
+    map.addImage(imageId, image, { pixelRatio: 2 });
+    return true;
+  } catch (e) {
+    console.error("Erreur addImage pour", imageId, e);
+    return false;
+  }
+}
+
+async function refreshVisualLayers() {
+  if (!map.isStyleLoaded()) {
+    return;
+  }
+
+  const hasPt1Marker = ensureCanvasMarkerImage("pt1-marker", "#1f6fff");
+  const hasPt2Marker = ensureCanvasMarkerImage("pt2-marker", "#ff8c00");
+  const hasAddressMarker = ensureCanvasMarkerImage("address-marker", "#26a641");
+
+  addOrUpdateSource(POINT1_SOURCE_ID, createPointFeature(point1));
+  if (hasPt1Marker) {
+    ensureLayerSymbol(POINT1_LAYER_ID, POINT1_SOURCE_ID, "pt1-marker", "bottom");
+  }
+
+  addOrUpdateSource(POINT2_SOURCE_ID, createPointFeature(point2));
+  if (hasPt2Marker) {
+    ensureLayerSymbol(POINT2_LAYER_ID, POINT2_SOURCE_ID, "pt2-marker", "bottom");
+  }
+
+  addOrUpdateSource(ADDRESS_SOURCE_ID, createAddressFeature());
+  if (hasAddressMarker) {
+    ensureLayerSymbol(ADDRESS_LAYER_ID, ADDRESS_SOURCE_ID, "address-marker", "bottom");
+  }
+
+  addOrUpdateSource(LINE_SOURCE_ID, createLineFeature());
+  ensureLayerLine(LINE_LAYER_ID, LINE_SOURCE_ID, {
+    "line-color": "#1f6fff",
+    "line-width": 3
+  });
+
+  addOrUpdateSource(CIRCLE_SOURCE_ID, createCircleFeature());
+  ensureLayerFill(CIRCLE_FILL_LAYER_ID, CIRCLE_SOURCE_ID, {
+    "fill-color": "#ff6666",
+    "fill-opacity": 0.15
+  });
+  ensureLayerLine(CIRCLE_LINE_LAYER_ID, CIRCLE_SOURCE_ID, {
+    "line-color": "#d40000",
+    "line-width": 2
+  });
+
+  addOrUpdateSource(ETAB_SOURCE_ID, etablissementsData);
+  ensureLayerCircle(ETAB_LAYER_ID, ETAB_SOURCE_ID, {
+    "circle-radius": 6,
+    "circle-color": "#26a641",
+    "circle-stroke-width": 2,
+    "circle-stroke-color": "#ffffff"
+  });
+
+  if (map.getLayer(ETAB_LAYER_ID)) {
+    map.setLayoutProperty(
+      ETAB_LAYER_ID,
+      "visibility",
+      chkEtablissements.checked ? "visible" : "none"
+    );
+  }
+}
+
+async function clearMeasure() {
   measureVersion++;
   point1 = null;
   point2 = null;
-
-  if (marker1) {
-    map.removeLayer(marker1);
-    marker1 = null;
-  }
-
-  if (marker2) {
-    map.removeLayer(marker2);
-    marker2 = null;
-  }
-
-  if (measureLine) {
-    map.removeLayer(measureLine);
-    measureLine = null;
-  }
+  measureLineGeoJSON = {
+    type: "FeatureCollection",
+    features: []
+  };
 
   clearGroundAltitudeInputs();
   unlockAltitudeMode();
   updateAltitudeInputMode();
+  await refreshVisualLayers();
   updateInfoCards();
   setStatus("Mesure effacée.");
 }
 
-function clearCircle() {
+async function clearCircle() {
   circleVersion++;
-
-  if (circleLayer) {
-    map.removeLayer(circleLayer);
-    circleLayer = null;
-  }
-
   circleInfo = null;
+  circleGeoJSON = {
+    type: "FeatureCollection",
+    features: []
+  };
+
+  await refreshVisualLayers();
   updateInfoCards();
   setStatus("Cercle effacé.");
 }
 
-function addPoint(latlng) {
-  lastClickedLatLng = L.latLng(latlng.lat, latlng.lng);
+async function addPoint(latlng) {
+  lastClickedLatLng = {
+    lat: Number(latlng.lat),
+    lng: Number(latlng.lng)
+  };
   updateCartoradioButtonState();
 
   if (!point1) {
@@ -1276,7 +1415,8 @@ function addPoint(latlng) {
     }
 
     point1 = createGeoPoint(latlng, measureVersion);
-    marker1 = L.marker(latlng, { icon: blueIcon }).addTo(map);
+    updateMeasureLineGeometry();
+    await refreshVisualLayers();
     updateInfoCards();
 
     if (chkAltitudeIgn.checked) {
@@ -1291,13 +1431,8 @@ function addPoint(latlng) {
 
   if (!point2) {
     point2 = createGeoPoint(latlng, measureVersion);
-    marker2 = L.marker(latlng, { icon: orangeIcon }).addTo(map);
-
-    measureLine = L.polyline([toLeafletLatLng(point1), toLeafletLatLng(point2)], {
-      color: "#1f6fff",
-      weight: 3
-    }).addTo(map);
-
+    updateMeasureLineGeometry();
+    await refreshVisualLayers();
     updateInfoCards();
 
     if (chkAltitudeIgn.checked) {
@@ -1310,12 +1445,13 @@ function addPoint(latlng) {
     return;
   }
 
-  clearMeasure();
+  await clearMeasure();
 
   lockAltitudeMode();
 
   point1 = createGeoPoint(latlng, measureVersion);
-  marker1 = L.marker(latlng, { icon: blueIcon }).addTo(map);
+  updateMeasureLineGeometry();
+  await refreshVisualLayers();
   updateInfoCards();
 
   if (chkAltitudeIgn.checked) {
@@ -1327,37 +1463,168 @@ function addPoint(latlng) {
   enrichPointAltitude("point1");
 }
 
+async function drawCircle() {
+  if (!lastClickedLatLng) {
+    setStatus("Cliquez d'abord sur un point de la carte.");
+    return;
+  }
+
+  let radius = normalizeNumber(rayonInput.value);
+
+  if (radius === null) {
+    radius = 100;
+  }
+
+  if (radius <= 0) {
+    setStatus("Le rayon doit être strictement positif.");
+    return;
+  }
+
+  circleInfo = {
+    lat: Number(lastClickedLatLng.lat),
+    lng: Number(lastClickedLatLng.lng),
+    radius: Number(radius),
+    altitude: null,
+    altitudeStatus: "pending",
+    token: null,
+    source: null
+  };
+
+  circleGeoJSON = createGeoJSONCircle(circleInfo, radius);
+  fetchCircleAltitudeIfNeeded();
+  await refreshVisualLayers();
+  updateInfoCards();
+  setStatus("Cercle dessiné.");
+}
+
+async function selectAddressFeature(feature, fallbackLabel) {
+  const coords = feature.geometry.coordinates;
+  const lon = Number(coords[0]);
+  const lat = Number(coords[1]);
+  const label = feature.properties.label || fallbackLabel || "Adresse trouvée";
+
+  addressPoint = { lat: lat, lng: lon };
+  addressLabel = label;
+
+  await refreshVisualLayers();
+  clearAddressResults();
+
+  map.flyTo({
+    center: [lon, lat],
+    zoom: 18,
+    essential: true
+  });
+
+  new maplibregl.Popup({ closeButton: true })
+    .setLngLat([lon, lat])
+    .setHTML(escapeHtml(label))
+    .addTo(map);
+
+  setStatus("Adresse sélectionnée : " + label);
+}
+
+function showAddressResults(features, fallbackLabel) {
+  clearAddressResults();
+
+  const title = document.createElement("div");
+  title.className = "result-item result-title";
+  title.textContent = "Résultats possibles :";
+  resultatsAdressesEl.appendChild(title);
+
+  features.forEach(function(feature) {
+    const item = document.createElement("div");
+    item.className = "result-item";
+    item.textContent = feature.properties.label || fallbackLabel || "Adresse sans libellé";
+
+    item.addEventListener("click", async function() {
+      await selectAddressFeature(feature, fallbackLabel);
+    });
+
+    resultatsAdressesEl.appendChild(item);
+  });
+
+  resultatsAdressesEl.style.display = "block";
+}
+
+async function geocodeAddress() {
+  const address = adresseInput.value.trim();
+
+  if (address === "") {
+    clearAddressResults();
+    addressPoint = null;
+    addressLabel = "";
+    await refreshVisualLayers();
+    setStatus("Veuillez saisir une adresse.");
+    return;
+  }
+
+  clearAddressResults();
+  setStatus("Recherche de l'adresse en cours...");
+
+  try {
+    const url =
+      "https://data.geopf.fr/geocodage/search?q=" +
+      encodeURIComponent(address) +
+      "&limit=5";
+
+    const response = await fetch(url, {
+      headers: {
+        "Accept": "application/json"
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error("Erreur HTTP");
+    }
+
+    const data = await response.json();
+
+    if (!data.features || data.features.length === 0) {
+      clearAddressResults();
+      addressPoint = null;
+      addressLabel = "";
+      await refreshVisualLayers();
+      setStatus("Adresse non trouvée.");
+      return;
+    }
+
+    if (data.features.length === 1) {
+      await selectAddressFeature(data.features[0], address);
+      return;
+    }
+
+    showAddressResults(data.features, address);
+    setStatus("Plusieurs résultats trouvés. Veuillez choisir une adresse.");
+  } catch (error) {
+    clearAddressResults();
+    addressPoint = null;
+    addressLabel = "";
+    await refreshVisualLayers();
+    setStatus("Erreur lors de la recherche de l'adresse.");
+  }
+}
+
 function getAmenityLabel(tags) {
-  if (tags.amenity === "kindergarten") {
-    return "Crèche";
-  }
-  if (tags.amenity === "school") {
-    return "Établissement scolaire";
-  }
-  if (tags.amenity === "college") {
-    return "Établissement scolaire";
-  }
-  if (tags.amenity === "hospital") {
-    return "Établissement de soins";
-  }
-  if (tags.amenity === "clinic") {
-    return "Établissement de soins";
-  }
-  if (tags.healthcare === "hospital") {
-    return "Établissement de soins";
-  }
-  if (tags.healthcare === "clinic") {
-    return "Établissement de soins";
-  }
+  if (tags.amenity === "kindergarten") return "Crèche";
+  if (tags.amenity === "school") return "Établissement scolaire";
+  if (tags.amenity === "college") return "Établissement scolaire";
+  if (tags.amenity === "hospital") return "Établissement de soins";
+  if (tags.amenity === "clinic") return "Établissement de soins";
+  if (tags.healthcare === "hospital") return "Établissement de soins";
+  if (tags.healthcare === "clinic") return "Établissement de soins";
   return "Établissement particulier";
 }
 
-function clearEtablissements() {
-  etablissementsLayer.clearLayers();
+async function clearEtablissements() {
+  etablissementsData = {
+    type: "FeatureCollection",
+    features: []
+  };
+  await refreshVisualLayers();
 }
 
-function buildEtablissementsLayerFromData(data) {
-  const newLayer = L.layerGroup();
+function buildEtablissementsGeoJSON(data) {
+  const features = [];
   const seen = new Set();
 
   (data.elements || []).forEach(function(element) {
@@ -1378,20 +1645,28 @@ function buildEtablissementsLayerFromData(data) {
     }
     seen.add(key);
 
-    const marker = L.marker([lat, lon], { icon: greenIcon });
-    marker.bindPopup(
-      "<strong>" + escapeHtml(name) + "</strong><br>" +
-      escapeHtml(typeLabel)
-    );
-    newLayer.addLayer(marker);
+    features.push({
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [lon, lat]
+      },
+      properties: {
+        name: name,
+        typeLabel: typeLabel
+      }
+    });
   });
 
-  return newLayer;
+  return {
+    type: "FeatureCollection",
+    features: features
+  };
 }
 
 async function loadEtablissements() {
   if (!chkEtablissements.checked) {
-    clearEtablissements();
+    await clearEtablissements();
     return;
   }
 
@@ -1438,23 +1713,13 @@ out center;
 
     const data = await response.json();
 
-    if (!chkEtablissements.checked) {
+    if (!chkEtablissements.checked || requestId !== etablissementsRequestId) {
       etablissementsLoading = false;
       return;
     }
 
-    if (requestId !== etablissementsRequestId) {
-      etablissementsLoading = false;
-      return;
-    }
-
-    const newLayer = buildEtablissementsLayerFromData(data);
-
-    map.removeLayer(etablissementsLayer);
-    etablissementsLayer = newLayer;
-    etablissementsLayer.addTo(map);
-
-    ensureAnfrLayerVisibility();
+    etablissementsData = buildEtablissementsGeoJSON(data);
+    await refreshVisualLayers();
     setStatus("Repérage des établissements particuliers mis à jour.");
   } catch (error) {
     if (chkEtablissements.checked) {
@@ -1479,92 +1744,6 @@ function scheduleLoadEtablissements() {
   }, 700);
 }
 
-function escapeHtml(text) {
-  return String(text)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function normalizeAnfrGeoJSON(data) {
-  if (!data || data.type !== "FeatureCollection" || !Array.isArray(data.features)) {
-    throw new Error("Le GeoJSON ANFR n'est pas une FeatureCollection valide.");
-  }
-
-  const features = [];
-  let validCount = 0;
-
-  data.features.forEach(function(feature) {
-    if (!feature || feature.type !== "Feature") {
-      return;
-    }
-
-    if (!feature.geometry || feature.geometry.type !== "Point") {
-      return;
-    }
-
-    const coords = feature.geometry.coordinates;
-    if (!Array.isArray(coords) || coords.length < 2) {
-      return;
-    }
-
-    const lon = Number(coords[0]);
-    const lat = Number(coords[1]);
-
-    if (!isFiniteLonLat(lon, lat)) {
-      return;
-    }
-
-    const clonedProperties = Object.assign({}, feature.properties || {});
-
-    if (clonedProperties.SUP_ID === undefined || clonedProperties.SUP_ID === null) {
-      clonedProperties.SUP_ID = "";
-    }
-
-    features.push({
-      type: "Feature",
-      geometry: {
-        type: "Point",
-        coordinates: [lon, lat]
-      },
-      properties: clonedProperties
-    });
-
-    validCount++;
-  });
-
-  if (validCount === 0) {
-    throw new Error("Aucun support ANFR valide n'a été trouvé dans le GeoJSON par défaut.");
-  }
-
-  return {
-    type: "FeatureCollection",
-    features: features
-  };
-}
-
-function buildAnfrLayerFromGeoJSON(data) {
-  return L.geoJSON(data, {
-    pane: "anfrPane",
-    pointToLayer: function(feature, latlng) {
-      return L.circleMarker(latlng, {
-        pane: "anfrPane",
-        renderer: anfrRenderer,
-        radius: 4,
-        stroke: true,
-        color: "#ffffff",
-        weight: 1.2,
-        fill: true,
-        fillColor: "#ff2b2b",
-        fillOpacity: 0.95,
-        interactive: false
-      });
-    }
-  });
-}
-
 async function getLatestDefaultAnfrMeta() {
   if (latestDefaultAnfrName && latestDefaultAnfrUrl) {
     return {
@@ -1587,13 +1766,11 @@ async function getLatestDefaultAnfrMeta() {
 
   const matches = files
     .filter(function(item) {
-      return (
-        item &&
+      return item &&
         item.type === "file" &&
         typeof item.name === "string" &&
         item.name.startsWith(ANFR_GEOJSON_PREFIX) &&
-        item.name.endsWith(ANFR_GEOJSON_SUFFIX)
-      );
+        item.name.endsWith(ANFR_GEOJSON_SUFFIX);
     })
     .sort(function(a, b) {
       return b.name.localeCompare(a.name);
@@ -1616,60 +1793,48 @@ async function getLatestDefaultAnfrMeta() {
   };
 }
 
-async function ensureAnfrLayerLoaded() {
-  if (anfrLayerLoaded && anfrLayer) {
-    return anfrLayer;
-  }
-
-  if (anfrLoadPromise) {
-    return anfrLoadPromise;
-  }
-
-  anfrLoadPromise = (async function() {
+async function ensureAntennesLayer() {
+  try {
     const meta = await getLatestDefaultAnfrMeta();
 
-    const response = await fetch(meta.downloadUrl, {
-      headers: {
-        "Accept": "application/json"
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error("Le téléchargement du GeoJSON ANFR par défaut a échoué.");
+    if (!map.getSource(ANFR_SOURCE_ID)) {
+      map.addSource(ANFR_SOURCE_ID, {
+        type: "geojson",
+        data: meta.downloadUrl
+      });
     }
 
-    const data = await response.json();
-    const normalizedData = normalizeAnfrGeoJSON(data);
-
-    anfrLayer = buildAnfrLayerFromGeoJSON(normalizedData);
-    anfrLayerLoaded = true;
-
-    return anfrLayer;
-  })();
-
-  try {
-    return await anfrLoadPromise;
-  } finally {
-    anfrLoadPromise = null;
-  }
-}
-
-function ensureAnfrLayerVisibility() {
-  if (!anfrLayerLoaded || !anfrLayer) {
-    return;
-  }
-
-  if (antennasVisible) {
-    if (!map.hasLayer(anfrLayer)) {
-      anfrLayer.addTo(map);
+    if (!map.getLayer(ANFR_LAYER_ID)) {
+      map.addLayer({
+        id: ANFR_LAYER_ID,
+        type: "circle",
+        source: ANFR_SOURCE_ID,
+        minzoom: 8,
+        paint: {
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            8, 2,
+            10, 3,
+            13, 4,
+            16, 6
+          ],
+          "circle-color": "#ff0000",
+          "circle-opacity": 0.85,
+          "circle-stroke-width": 1.2,
+          "circle-stroke-color": "#ffffff"
+        }
+      });
     }
-    if (typeof anfrLayer.bringToFront === "function") {
-      anfrLayer.bringToFront();
-    }
-  } else {
-    if (map.hasLayer(anfrLayer)) {
-      map.removeLayer(anfrLayer);
-    }
+
+    map.setLayoutProperty(
+      ANFR_LAYER_ID,
+      "visibility",
+      antennasVisible ? "visible" : "none"
+    );
+  } catch (error) {
+    setStatus("Impossible d'activer l'affichage des supports ANFR.");
   }
 }
 
@@ -1677,18 +1842,13 @@ async function toggleAntennes() {
   antennasVisible = !antennasVisible;
   updateAntennesButtonLabel();
 
-  if (!antennasVisible) {
-    if (anfrLayer && map.hasLayer(anfrLayer)) {
-      map.removeLayer(anfrLayer);
-    }
-    setStatus("Affichage des supports ANFR masqué.");
-    return;
-  }
-
   try {
-    await ensureAnfrLayerLoaded();
-    ensureAnfrLayerVisibility();
-    setStatus("Affichage des supports ANFR activé.");
+    await ensureAntennesLayer();
+    setStatus(
+      antennasVisible
+        ? "Affichage des supports ANFR activé."
+        : "Affichage des supports ANFR masqué."
+    );
   } catch (error) {
     antennasVisible = false;
     updateAntennesButtonLabel();
@@ -1712,118 +1872,6 @@ function openCartoradioAtLastPoint() {
   setStatus("Ouverture de Cartoradio sur le dernier point cliqué.");
 }
 
-map.on("click", function(e) {
-  addPoint(e.latlng);
-});
-
-map.on("moveend", function() {
-  scheduleLoadEtablissements();
-});
-
-async function geocodeAddress() {
-  const address = adresseInput.value.trim();
-
-  if (address === "") {
-    clearAddressResults();
-    if (addressMarker) {
-      map.removeLayer(addressMarker);
-      addressMarker = null;
-    }
-    setStatus("Veuillez saisir une adresse.");
-    return;
-  }
-
-  clearAddressResults();
-  setStatus("Recherche de l'adresse en cours...");
-
-  try {
-    const url =
-      "https://data.geopf.fr/geocodage/search?q=" +
-      encodeURIComponent(address) +
-      "&limit=5";
-
-    const response = await fetch(url, {
-      headers: {
-        "Accept": "application/json"
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error("Erreur HTTP");
-    }
-
-    const data = await response.json();
-
-    if (!data.features || data.features.length === 0) {
-      clearAddressResults();
-      if (addressMarker) {
-        map.removeLayer(addressMarker);
-        addressMarker = null;
-      }
-      setStatus("Adresse non trouvée.");
-      return;
-    }
-
-    if (data.features.length === 1) {
-      selectAddressFeature(data.features[0], address);
-      return;
-    }
-
-    showAddressResults(data.features, address);
-    setStatus("Plusieurs résultats trouvés. Veuillez choisir une adresse.");
-  } catch (error) {
-    clearAddressResults();
-    if (addressMarker) {
-      map.removeLayer(addressMarker);
-      addressMarker = null;
-    }
-    setStatus("Erreur lors de la recherche de l'adresse.");
-  }
-}
-
-function drawCircle() {
-  if (!lastClickedLatLng) {
-    setStatus("Cliquez d'abord sur un point de la carte.");
-    return;
-  }
-
-  let radius = normalizeNumber(rayonInput.value);
-
-  if (radius === null) {
-    radius = 100;
-  }
-
-  if (radius <= 0) {
-    setStatus("Le rayon doit être strictement positif.");
-    return;
-  }
-
-  if (circleLayer) {
-    map.removeLayer(circleLayer);
-  }
-
-  circleLayer = L.circle(lastClickedLatLng, {
-    radius: radius,
-    color: "#d40000",
-    weight: 2,
-    fillColor: "#ff6666",
-    fillOpacity: 0.15
-  }).addTo(map);
-
-  circleInfo = {
-    lat: Number(lastClickedLatLng.lat),
-    lng: Number(lastClickedLatLng.lng),
-    altitude: null,
-    altitudeStatus: "pending",
-    token: null,
-    source: null
-  };
-
-  fetchCircleAltitudeIfNeeded();
-  updateInfoCards();
-  setStatus("Cercle dessiné.");
-}
-
 async function copyText(value, label) {
   if (!value || value === "-" || value === "calcul..." || value === "indisponible") {
     setStatus(label + " indisponible.");
@@ -1836,8 +1884,7 @@ async function copyText(value, label) {
       setStatus(label + " copié.");
       return;
     }
-  } catch (error) {
-  }
+  } catch (error) {}
 
   try {
     const area = document.createElement("textarea");
@@ -1898,20 +1945,21 @@ async function copyNumericText(text, label) {
 
   await copyText(numericValue, label);
 }
-  
+
 async function exportMapPng() {
   setStatus("Export PNG en cours...");
 
   try {
-    const canvas = await html2canvas(document.getElementById("map"), {
-      useCORS: true,
-      backgroundColor: null,
-      logging: false
-    });
+    const canvas = map.getCanvas();
+    const dataURL = canvas.toDataURL("image/png");
+
+    if (!dataURL || dataURL === "data:,") {
+      throw new Error("PNG vide");
+    }
 
     const link = document.createElement("a");
     link.download = "carte.png";
-    link.href = canvas.toDataURL("image/png");
+    link.href = dataURL;
     link.click();
 
     setStatus("Export PNG terminé.");
@@ -1920,40 +1968,106 @@ async function exportMapPng() {
   }
 }
 
-fondCarteSelect.addEventListener("change", function() {
-  const value = fondCarteSelect.value;
-
-  if (value === "plan") {
-    if (map.hasLayer(ignOrtho)) {
-      map.removeLayer(ignOrtho);
-    }
-    if (!map.hasLayer(ignPlan)) {
-      ignPlan.addTo(map);
-    }
+map.on("load", async function() {
+  await refreshVisualLayers();
+  if (chkEtablissements.checked) {
+    await loadEtablissements();
   }
-
-  if (value === "ortho") {
-    if (map.hasLayer(ignPlan)) {
-      map.removeLayer(ignPlan);
-    }
-    if (!map.hasLayer(ignOrtho)) {
-      ignOrtho.addTo(map);
-    }
-  }
-
-  ensureAnfrLayerVisibility();
+  await ensureAntennesLayer();
 });
 
-chkEtablissements.addEventListener("change", function() {
+map.on("style.load", async function() {
+  await refreshVisualLayers();
   if (chkEtablissements.checked) {
-    loadEtablissements();
+    await loadEtablissements();
+  }
+  await ensureAntennesLayer();
+});
+
+map.on("moveend", function() {
+  scheduleLoadEtablissements();
+});
+
+map.on("click", async function(e) {
+  const antennaFeatures = map.getLayer(ANFR_LAYER_ID)
+    ? map.queryRenderedFeatures(e.point, { layers: [ANFR_LAYER_ID] })
+    : [];
+
+  if (antennaFeatures.length > 0) {
+    const feature = antennaFeatures[0];
+    const coords = feature.geometry.coordinates.slice();
+    const supId = feature.properties && feature.properties.SUP_ID ? feature.properties.SUP_ID : "";
+
+    new maplibregl.Popup({ closeButton: true })
+      .setLngLat(coords)
+      .setHTML(
+        "<strong>Support ANFR</strong><br>" +
+        "SUP_ID : " + escapeHtml(supId) +
+        "<br><a href='https://www.cartoradio.fr/#/cartographie/lonlat/" +
+        coords[0] +
+        "/" +
+        coords[1] +
+        "' target='_blank' rel='noopener'>Ouvrir Cartoradio</a>"
+      )
+      .addTo(map);
+    return;
+  }
+
+  const etabFeatures = map.getLayer(ETAB_LAYER_ID)
+    ? map.queryRenderedFeatures(e.point, { layers: [ETAB_LAYER_ID] })
+    : [];
+
+  if (etabFeatures.length > 0) {
+    const feature = etabFeatures[0];
+    const coords = feature.geometry.coordinates.slice();
+    const name = feature.properties && feature.properties.name ? feature.properties.name : "Établissement sans nom";
+    const typeLabel = feature.properties && feature.properties.typeLabel ? feature.properties.typeLabel : "Établissement particulier";
+
+    new maplibregl.Popup({ closeButton: true })
+      .setLngLat(coords)
+      .setHTML(
+        "<strong>" + escapeHtml(name) + "</strong><br>" +
+        escapeHtml(typeLabel)
+      )
+      .addTo(map);
+    return;
+  }
+
+  await addPoint({
+    lat: e.lngLat.lat,
+    lng: e.lngLat.lng
+  });
+});
+
+map.on("mousemove", function(e) {
+  let isPointer = false;
+
+  if (map.getLayer(ANFR_LAYER_ID)) {
+    const features = map.queryRenderedFeatures(e.point, { layers: [ANFR_LAYER_ID] });
+    if (features.length > 0) {
+      isPointer = true;
+    }
+  }
+
+  if (!isPointer && map.getLayer(ETAB_LAYER_ID)) {
+    const features = map.queryRenderedFeatures(e.point, { layers: [ETAB_LAYER_ID] });
+    if (features.length > 0) {
+      isPointer = true;
+    }
+  }
+
+  map.getCanvas().style.cursor = isPointer ? "pointer" : "";
+});
+
+chkEtablissements.addEventListener("change", async function() {
+  if (chkEtablissements.checked) {
+    await loadEtablissements();
   } else {
     if (etablissementsFetchTimer) {
       clearTimeout(etablissementsFetchTimer);
     }
     etablissementsRequestId++;
-    clearEtablissements();
-    ensureAnfrLayerVisibility();
+    await clearEtablissements();
     setStatus("Repérage des établissements particuliers masqué.");
   }
 });
@@ -2032,7 +2146,6 @@ document.getElementById("copyAzimuthOffset").addEventListener("click", function(
 document.getElementById("copyElevationOffset").addEventListener("click", function() {
   copyNumericText(segmentElevationOffsetEl.textContent, "Déport en élévation");
 });
-  
 
 [
   axisAzimuthInput,
