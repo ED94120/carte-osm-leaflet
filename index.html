@@ -1856,6 +1856,25 @@ async function toggleAntennes() {
   }
 }
 
+async function redrawDynamicLayersAfterStyleChange() {
+  await new Promise(function(resolve) {
+    if (map.loaded()) {
+      resolve();
+    } else {
+      map.once("idle", resolve);
+    }
+  });
+
+  await refreshVisualLayers();
+
+  if (chkEtablissements.checked) {
+    await loadEtablissements();
+  }
+
+  await ensureAntennesLayer();
+  map.triggerRepaint();
+}
+
 function openCartoradioAtLastPoint() {
   if (!lastClickedLatLng) {
     setStatus("Cliquez d'abord sur un point de la carte.");
@@ -1946,24 +1965,54 @@ async function copyNumericText(text, label) {
   await copyText(numericValue, label);
 }
 
-async function exportMapPng() {
+function exportMapPng() {
   setStatus("Export PNG en cours...");
 
   try {
-    const canvas = map.getCanvas();
-    const dataURL = canvas.toDataURL("image/png");
+    map.once("render", function() {
+      try {
+        const canvas = map.getCanvas();
 
-    if (!dataURL || dataURL === "data:,") {
-      throw new Error("PNG vide");
-    }
+        const exportCanvas = document.createElement("canvas");
+        exportCanvas.width = canvas.width;
+        exportCanvas.height = canvas.height;
 
-    const link = document.createElement("a");
-    link.download = "carte.png";
-    link.href = dataURL;
-    link.click();
+        const ctx = exportCanvas.getContext("2d");
+        if (!ctx) {
+            throw new Error("Contexte 2D indisponible");
+        }
 
-    setStatus("Export PNG terminé.");
+        ctx.drawImage(canvas, 0, 0);
+
+        exportCanvas.toBlob(function(blob) {
+          if (!blob) {
+            setStatus("Impossible de générer le PNG.");
+            return;
+          }
+
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = "carte-" + Date.now() + ".png";
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+
+          setTimeout(function() {
+            URL.revokeObjectURL(url);
+          }, 1000);
+
+          setStatus("Export PNG terminé.");
+        }, "image/png");
+      } catch (error) {
+        console.error("Erreur export PNG :", error);
+        setStatus("Impossible de générer le PNG.");
+      }
+    });
+
+    map.triggerRepaint();
   } catch (error) {
+    console.error("Erreur export PNG :", error);
     setStatus("Impossible de générer le PNG.");
   }
 }
@@ -1977,11 +2026,7 @@ map.on("load", async function() {
 });
 
 map.on("style.load", async function() {
-  await refreshVisualLayers();
-  if (chkEtablissements.checked) {
-    await loadEtablissements();
-  }
-  await ensureAntennesLayer();
+  await redrawDynamicLayersAfterStyleChange();
 });
 
 map.on("moveend", function() {
