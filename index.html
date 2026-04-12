@@ -1993,7 +1993,19 @@ function exportMapPng() {
           const url = URL.createObjectURL(blob);
           const link = document.createElement("a");
           link.href = url;
-          link.download = "carte-" + Date.now() + ".png";
+        
+          const now = new Date();
+          const fileName =
+            "carte-" +
+            String(now.getDate()).padStart(2, "0") + "-" +
+            String(now.getMonth() + 1).padStart(2, "0") + "-" +
+            now.getFullYear() + "_" +
+            String(now.getHours()).padStart(2, "0") + "h" +
+            String(now.getMinutes()).padStart(2, "0") + "m" +
+            String(now.getSeconds()).padStart(2, "0") + "s.png";
+
+          link.download = fileName;
+
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
