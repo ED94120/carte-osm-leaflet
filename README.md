@@ -1,4 +1,4 @@
-# carte-ign-geometrue-antennes
+# carte-ign-geometrie-antennes
 
 Utilitaire cartographique web utilisant Leaflet et OpenStreetMap.
 
